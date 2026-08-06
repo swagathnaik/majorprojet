@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "title": "SafeRoute demo crime hotspots",
+    "city": "Bengaluru (demo)",
+    "disclaimer": "SYNTHETIC demo data for academic demonstration only. Not real police crime records. Historical crime does not guarantee current danger; absence of points does not mean an area is safe.",
+    "generated_for": "SafeRoute Phase 13-14 optional modules"
+  },
+  "hotspots": [
+    {"lat": 12.9784, "lng": 77.6408, "intensity": 0.9, "type": "theft", "label": "Indiranagar demo cluster"},
+    {"lat": 12.9765, "lng": 77.5993, "intensity": 0.75, "type": "robbery", "label": "MG Road demo cluster"},
+    {"lat": 12.9716, "lng": 77.5946, "intensity": 0.55, "type": "assault", "label": "Cubbon area demo"},
+    {"lat": 12.9352, "lng": 77.6245, "intensity": 0.85, "type": "theft", "label": "Koramangala demo"},
+    {"lat": 12.9279, "lng": 77.6271, "intensity": 0.7, "type": "harassment", "label": "Koramangala 5th demo"},
+    {"lat": 12.9698, "lng": 77.7500, "intensity": 0.65, "type": "theft", "label": "Whitefield demo"},
+    {"lat": 12.9141, "lng": 77.6387, "intensity": 0.8, "type": "robbery", "label": "HSR demo"},
+    {"lat": 12.9592, "lng": 77.6974, "intensity": 0.6, "type": "theft", "label": "Marathahalli demo"},
+    {"lat": 13.0020, "lng": 77.5700, "intensity": 0.72, "type": "assault", "label": "Malleshwaram demo"},
+    {"lat": 12.9850, "lng": 77.5500, "intensity": 0.68, "type": "theft", "label": "Rajajinagar demo"},
+    {"lat": 12.8450, "lng": 77.6600, "intensity": 0.5, "type": "theft", "label": "Electronic City demo"},
+    {"lat": 13.0358, "lng": 77.5970, "intensity": 0.58, "type": "harassment", "label": "Hebbal demo"},
+    {"lat": 12.9166, "lng": 77.6101, "intensity": 0.62, "type": "theft", "label": "BTM demo"},
+    {"lat": 12.9980, "lng": 77.6150, "intensity": 0.48, "type": "theft", "label": "Frazer Town demo"},
+    {"lat": 12.9540, "lng": 77.4900, "intensity": 0.77, "type": "robbery", "label": "Vijayanagar demo"},
+    {"lat": 12.9900, "lng": 77.6600, "intensity": 0.66, "type": "theft", "label": "CV Raman Nagar demo"},
+    {"lat": 12.9400, "lng": 77.5800, "intensity": 0.52, "type": "assault", "label": "Jayanagar demo"},
+    {"lat": 13.0200, "lng": 77.6400, "intensity": 0.7, "type": "theft", "label": "Kalyan Nagar demo"},
+    {"lat": 12.9650, "lng": 77.6100, "intensity": 0.45, "type": "theft", "label": "Ulsoor demo"},
+    {"lat": 12.9200, "lng": 77.5500, "intensity": 0.73, "type": "robbery", "label": "Banashankari demo"},
+    {"lat": 12.9780, "lng": 77.5720, "intensity": 0.8, "type": "harassment", "label": "Majestic demo"},
+    {"lat": 12.9660, "lng": 77.6060, "intensity": 0.4, "type": "theft", "label": "Commercial Street demo"},
+    {"lat": 12.9500, "lng": 77.6400, "intensity": 0.58, "type": "theft", "label": "Domlur demo"},
+    {"lat": 13.0100, "lng": 77.5800, "intensity": 0.63, "type": "assault", "label": "Yeswanthpur demo"}
+  ]
+}
