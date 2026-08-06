@@ -309,7 +309,7 @@ def manual_sos(journey_id: int):
             lat = last.lat if lat is None else lat
             lng = last.lng if lng is None else lng
 
-    alert = create_sos_alert(
+    alert, notifications = create_sos_alert(
         journey,
         sos_type="manual",
         reason=data.get("reason") or "Manual SOS button pressed",
@@ -324,7 +324,7 @@ def manual_sos(journey_id: int):
                 "message": "Manual SOS triggered.",
                 "sos": alert.to_dict(),
                 "journey": _journey_payload(journey),
-                "note": "Contact notification dashboard comes in Phase 10–12. Alert is stored.",
+                "notifications": notifications,
             }
         ),
         201,

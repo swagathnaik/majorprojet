@@ -15,6 +15,17 @@ import {
 
 const DEFAULT_INTERVAL_SEC = 5;
 
+function contactNotifyMessage(notifications, fallback) {
+  if (!Array.isArray(notifications) || notifications.length === 0) {
+    return fallback;
+  }
+  const names = notifications.map((n) => n.contact_name).filter(Boolean);
+  if (names.length) {
+    return `${fallback} — message sent to ${names.join(", ")}.`;
+  }
+  return `${fallback} — ${notifications.length} contact(s) notified.`;
+}
+
 /**
  * Full Safe Journey pipeline:
  * start → GPS + auto-share → monitor → anomaly → "Are you safe?" → SOS → contact / 112
@@ -261,7 +272,12 @@ export default function Journey() {
       const data = await journeysApi.sos(token, journey.id, payload);
       setJourney(data.journey);
       setSosAlert(data.sos);
-      setStatusMsg("SOS triggered — trusted contact notified.");
+      setStatusMsg(
+        contactNotifyMessage(
+          data.notifications,
+          "SOS triggered — emergency contacts notified"
+        )
+      );
     } catch (err) {
       enqueueOffline({ kind: "sos", journeyId: journey.id, payload });
       setOfflinePending(pendingOfflineCount());
@@ -323,7 +339,12 @@ export default function Journey() {
       setOpenAnomalies([]);
       setJourney(data.journey);
       setSosAlert(data.sos);
-      setStatusMsg("Help requested — SOS sent to trusted contact.");
+      setStatusMsg(
+        contactNotifyMessage(
+          data.notifications,
+          "Help requested — SOS sent to emergency contacts"
+        )
+      );
     } catch (err) {
       setError(err.message || "Could not request help.");
     } finally {
@@ -361,7 +382,12 @@ export default function Journey() {
       setOpenAnomalies([]);
       setJourney(data.journey);
       setSosAlert(data.sos);
-      setStatusMsg("Automatic SOS — no response to safety check.");
+      setStatusMsg(
+        contactNotifyMessage(
+          data.notifications,
+          "Automatic SOS — no response to safety check"
+        )
+      );
     } catch (err) {
       if (!String(err.message || "").includes("already")) {
         setError(err.message || "Timeout handling failed.");
@@ -498,7 +524,7 @@ export default function Journey() {
                 )}
                 {sosAlert && (
                   <div className="map-error">
-                    SOS active — alert #{sosAlert.id} · contact notified
+                    SOS active — alert #{sosAlert.id} · emergency contacts notified
                     {sosAlert.trigger_reason
                       ? ` · ${sosAlert.trigger_reason}`
                       : ""}

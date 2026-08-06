@@ -7,7 +7,6 @@ from app.extensions import db
 from app.models.journey import Journey
 from app.models.location import LocationLog
 from app.models.sos import SosAlert
-from app.models.contact import EmergencyContact
 
 
 def create_sos_alert(
@@ -17,9 +16,9 @@ def create_sos_alert(
     reason: str,
     lat: float | None = None,
     lng: float | None = None,
-) -> SosAlert:
+) -> tuple[SosAlert, list[dict]]:
     """
-    Create an SOS alert, mark journey as sos, and notify trusted contact.
+    Create an SOS alert, mark journey as sos, and notify all emergency contacts.
     sos_type: manual | automatic
     """
     if lat is None or lng is None:
@@ -45,15 +44,13 @@ def create_sos_alert(
     db.session.add(alert)
     db.session.flush()  # get alert.id before notify
 
-    contact = None
-    if journey.active_contact_id:
-        contact = db.session.get(EmergencyContact, journey.active_contact_id)
+    notifications: list[dict] = []
     try:
-        from app.services.notify import notify_sos
+        from app.services.notify import notify_sos_all_contacts
 
-        notify_sos(journey, alert, contact)
+        notifications = notify_sos_all_contacts(journey, alert)
     except Exception:
         # Never block SOS persistence on notify failure
         pass
 
-    return alert
+    return alert, notifications

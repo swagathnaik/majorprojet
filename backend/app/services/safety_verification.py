@@ -76,7 +76,7 @@ def respond_to_safety_check(
         anomaly = db.session.get(Anomaly, check.anomaly_id)
         if anomaly and anomaly.status == "open":
             anomaly.status = "escalated"
-        alert = create_sos_alert(
+        alert, notifications = create_sos_alert(
             journey,
             sos_type="manual",
             reason="User selected I NEED HELP after anomaly verification",
@@ -88,6 +88,7 @@ def respond_to_safety_check(
             "message": "Help requested — SOS triggered.",
             "safety_check": safety_check_payload(check),
             "sos": alert.to_dict(),
+            "notifications": notifications,
             "journey": journey.to_dict(),
         }
 
@@ -137,7 +138,7 @@ def timeout_safety_check(
     if anomaly:
         reason = f"{reason} ({anomaly.type})"
 
-    alert = create_sos_alert(
+    alert, notifications = create_sos_alert(
         journey,
         sos_type="automatic",
         reason=reason,
@@ -149,6 +150,7 @@ def timeout_safety_check(
         "message": "Automatic SOS triggered.",
         "safety_check": safety_check_payload(check),
         "sos": alert.to_dict(),
+        "notifications": notifications,
         "journey": journey.to_dict(),
     }
 

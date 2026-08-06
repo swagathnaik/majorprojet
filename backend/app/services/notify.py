@@ -3,11 +3,18 @@ Trusted-contact notifications (Phase 10–12).
 
 Demo mode: records notification events (no real SMS gateway required).
 Optional SMTP if NOTIFY_SMTP_* env vars are set.
+Optional Fast2SMS (India) if FAST2SMS_API_KEY is set.
+Optional Twilio SMS if TWILIO_* env vars are set.
 """
 from __future__ import annotations
 
+import base64
 import json
+import re
 import smtplib
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from pathlib import Path
@@ -71,7 +78,7 @@ def notify_sos(
     alert: SosAlert,
     contact: EmergencyContact | None,
 ) -> dict:
-    """Notify trusted contact (+ optional 112 hint) when SOS is created."""
+    """Notify one trusted contact when SOS is created."""
     user = User.query.get(journey.user_id)
     share_url = journey_share_url(journey)
     loc = ""
@@ -100,7 +107,6 @@ def notify_sos(
         ),
     }
     delivery = _deliver(payload, contact)
-    # Simulate offline / poor-network fallback path for demos
     if delivery.get("network") == "degraded":
         delivery["fallback"] = {
             "mode": "store_and_forward",
@@ -114,10 +120,174 @@ def notify_sos(
     return payload
 
 
+def notify_sos_all_contacts(journey: Journey, alert: SosAlert) -> list[dict]:
+    """Send SOS alert to every emergency contact saved for this user."""
+    from app.models.contact import EmergencyContact as EC
+
+    contacts = (
+        EC.query.filter_by(user_id=journey.user_id)
+        .order_by(EC.is_primary.desc(), EC.id.asc())
+        .all()
+    )
+    if not contacts and journey.active_contact_id:
+        fallback = EC.query.get(journey.active_contact_id)
+        if fallback:
+            contacts = [fallback]
+
+    results: list[dict] = []
+    for contact in contacts:
+        try:
+            results.append(notify_sos(journey, alert, contact))
+        except Exception as err:  # noqa: BLE001 – never block other contacts
+            results.append(
+                {
+                    "event": "sos_alert",
+                    "contact_id": contact.id,
+                    "contact_name": contact.name,
+                    "contact_phone": contact.phone,
+                    "delivery": {"status": "failed", "error": str(err)},
+                }
+            )
+    return results
+
+
+def _normalize_phone_e164(phone: str) -> str:
+    """Normalize Indian/local numbers to E.164 (+91...) for SMS gateways."""
+    digits = re.sub(r"\D", "", phone or "")
+    if not digits:
+        return phone
+    if digits.startswith("91") and len(digits) == 12:
+        return f"+{digits}"
+    if len(digits) == 10:
+        return f"+91{digits}"
+    if phone.strip().startswith("+"):
+        return phone.strip()
+    return f"+{digits}"
+
+
+def _normalize_phone_india_10(phone: str) -> str:
+    """Extract a 10-digit Indian mobile number for Fast2SMS."""
+    digits = re.sub(r"\D", "", phone or "")
+    if digits.startswith("91") and len(digits) >= 12:
+        digits = digits[-10:]
+    elif len(digits) > 10:
+        digits = digits[-10:]
+    if len(digits) != 10:
+        raise ValueError(f"Invalid Indian mobile number: {phone}")
+    return digits
+
+
+def _sms_text(payload: dict) -> str:
+    """Compact SMS body (Fast2SMS / Twilio character limits)."""
+    if payload.get("event") == "sos_alert":
+        traveler = payload.get("traveler") or "Traveler"
+        reason = (payload.get("reason") or "emergency")[:100]
+        share = payload.get("share_url") or ""
+        loc = ""
+        if payload.get("lat") is not None and payload.get("lng") is not None:
+            loc = f" @ {payload['lat']:.4f},{payload['lng']:.4f}"
+        return f"SOS! {traveler}: {reason}{loc}. Track: {share}"[:480]
+    return (payload.get("message") or "")[:480]
+
+
+def _fast2sms_configured() -> bool:
+    return bool(current_app.config.get("FAST2SMS_API_KEY"))
+
+
+def _send_sms_fast2sms(to_phone: str, body: str) -> None:
+    api_key = current_app.config["FAST2SMS_API_KEY"]
+    numbers = _normalize_phone_india_10(to_phone)
+    url = "https://www.fast2sms.com/dev/bulkV2"
+    data = urllib.parse.urlencode(
+        {
+            "message": body,
+            "route": "q",
+            "language": "english",
+            "numbers": numbers,
+        }
+    ).encode()
+    req = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("authorization", api_key)
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as err:
+        detail = err.read().decode("utf-8", errors="replace")[:200]
+        raise RuntimeError(f"Fast2SMS HTTP {err.code}: {detail}") from err
+
+    try:
+        result = json.loads(raw)
+    except json.JSONDecodeError as err:
+        raise RuntimeError(f"Fast2SMS invalid response: {raw[:200]}") from err
+
+    if not result.get("return"):
+        msg = result.get("message")
+        if isinstance(msg, list):
+            msg = ", ".join(str(m) for m in msg)
+        raise RuntimeError(f"Fast2SMS: {msg or 'send failed'}")
+
+
+def _twilio_configured() -> bool:
+    return bool(
+        current_app.config.get("TWILIO_ACCOUNT_SID")
+        and current_app.config.get("TWILIO_AUTH_TOKEN")
+        and current_app.config.get("TWILIO_FROM_NUMBER")
+    )
+
+
+def _send_sms_twilio(to_phone: str, body: str) -> None:
+    sid = current_app.config["TWILIO_ACCOUNT_SID"]
+    token = current_app.config["TWILIO_AUTH_TOKEN"]
+    from_num = current_app.config["TWILIO_FROM_NUMBER"]
+    to_e164 = _normalize_phone_e164(to_phone)
+
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
+    data = urllib.parse.urlencode(
+        {"To": to_e164, "From": from_num, "Body": body}
+    ).encode()
+    auth = base64.b64encode(f"{sid}:{token}".encode()).decode()
+    req = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("Authorization", f"Basic {auth}")
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            if resp.status >= 400:
+                raise RuntimeError(f"Twilio HTTP {resp.status}")
+    except urllib.error.HTTPError as err:
+        detail = err.read().decode("utf-8", errors="replace")[:200]
+        raise RuntimeError(f"Twilio error {err.code}: {detail}") from err
+
+
 def _deliver(payload: dict, contact: EmergencyContact | None) -> dict:
-    """Attempt SMTP if configured; always record a demo delivery receipt."""
+    """Attempt SMS (Twilio) + SMTP if configured; always record a demo receipt."""
     channels = ["in_app_log"]
     smtp_ok = False
+    sms_ok = False
+    sms_provider = None
+
+    if contact and contact.phone:
+        if _fast2sms_configured():
+            try:
+                _send_sms_fast2sms(contact.phone, _sms_text(payload))
+                channels.append("sms")
+                sms_ok = True
+                sms_provider = "fast2sms"
+            except Exception as err:  # noqa: BLE001 – demo resilient
+                channels.append(f"sms_failed:fast2sms:{err}")
+        elif _twilio_configured():
+            try:
+                _send_sms_twilio(contact.phone, _sms_text(payload))
+                channels.append("sms")
+                sms_ok = True
+                sms_provider = "twilio"
+            except Exception as err:  # noqa: BLE001 – demo resilient
+                channels.append(f"sms_failed:twilio:{err}")
+        else:
+            channels.append("sms_stub")
+
     smtp_to = current_app.config.get("NOTIFY_EMAIL_TO") or ""
     if current_app.config.get("NOTIFY_SMTP_HOST") and smtp_to:
         try:
@@ -127,10 +297,6 @@ def _deliver(payload: dict, contact: EmergencyContact | None) -> dict:
         except Exception as err:  # noqa: BLE001 – demo resilient
             channels.append(f"email_failed:{err}")
 
-    # Demo SMS stub (no Twilio key needed)
-    if contact and contact.phone:
-        channels.append("sms_stub")
-
     network = "online"
     if current_app.config.get("SIMULATE_POOR_NETWORK"):
         network = "degraded"
@@ -138,9 +304,11 @@ def _deliver(payload: dict, contact: EmergencyContact | None) -> dict:
     return {
         "status": "queued" if network == "degraded" else "recorded",
         "channels": channels,
+        "sms_sent": sms_ok,
+        "sms_provider": sms_provider,
         "smtp_sent": smtp_ok,
         "network": network,
-        "demo": True,
+        "demo": not sms_ok and not smtp_ok,
     }
 
 

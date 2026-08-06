@@ -47,3 +47,11 @@ class Config:
     NOTIFY_SMTP_PASSWORD = os.getenv("NOTIFY_SMTP_PASSWORD", "")
     NOTIFY_SMTP_FROM = os.getenv("NOTIFY_SMTP_FROM", "")
     NOTIFY_EMAIL_TO = os.getenv("NOTIFY_EMAIL_TO", "")
+
+    # Optional Twilio SMS to emergency contact phone numbers
+    TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+    TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+    TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "")
+
+    # Optional Fast2SMS (India) – free tier at fast2sms.com Dev API
+    FAST2SMS_API_KEY = os.getenv("FAST2SMS_API_KEY", "")

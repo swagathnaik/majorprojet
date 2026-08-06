@@ -111,6 +111,47 @@ def run():
         assert body["safety_check"]["status"] == "timeout"
         assert body["sos"]["type"] == "automatic"
         assert body["journey"]["status"] == "sos"
+        assert len(body.get("notifications") or []) == 1
+        assert body["notifications"][0]["contact_name"] == "Mom"
+
+        # --- Automatic SOS notifies all contacts ---
+        r = client.post(
+            "/api/auth/register",
+            json={"name": "Multi", "email": "multi@example.com", "password": "secret1"},
+        )
+        headers5 = auth_header(r.get_json()["access_token"])
+        client.post(
+            "/api/contacts",
+            headers=headers5,
+            json={"name": "Mom", "phone": "9876543210", "relationship": "Mother"},
+        )
+        client.post(
+            "/api/contacts",
+            headers=headers5,
+            json={"name": "Dad", "phone": "9876543211", "relationship": "Father"},
+        )
+        r = client.post(
+            "/api/journeys",
+            headers=headers5,
+            json={"dest_label": "Home", "start_lat": 12.97, "start_lng": 77.59},
+        )
+        jid5 = r.get_json()["journey"]["id"]
+        r = client.post(
+            f"/api/journeys/{jid5}/demo/simulate-anomaly",
+            headers=headers5,
+            json={"type": "prolonged_stop"},
+        )
+        check5 = r.get_json()["active_safety_check"]["id"]
+        r = client.post(
+            f"/api/safety-checks/{check5}/timeout",
+            headers=headers5,
+            json={"lat": 12.971, "lng": 77.591},
+        )
+        assert r.status_code == 200, r.data
+        body5 = r.get_json()
+        assert len(body5["notifications"]) == 2
+        notified = {n["contact_name"] for n in body5["notifications"]}
+        assert notified == {"Mom", "Dad"}
 
         # --- Cancel countdown ---
         r = client.post(
