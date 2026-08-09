@@ -259,24 +259,35 @@ def _should_skip(journey_id: int, anomaly_type: str) -> bool:
 
 
 def _create_anomaly(journey: Journey, candidate: dict) -> Anomaly:
+    is_route_deviation = candidate["type"] == "route_deviation"
     anomaly = Anomaly(
         journey_id=journey.id,
         type=candidate["type"],
-        severity=candidate.get("severity", "medium"),
-        status="open",
+        severity="high" if is_route_deviation else candidate.get("severity", "medium"),
+        status="escalated" if is_route_deviation else "open",
         details_json=json.dumps(candidate.get("details") or {}),
     )
     db.session.add(anomaly)
     db.session.flush()
 
-    # Phase 9 will present this to the user – created now so the gate exists
-    check = SafetyCheck(
-        anomaly_id=anomaly.id,
-        journey_id=journey.id,
-        status="pending",
-        countdown_seconds=int(current_app.config.get("SOS_COUNTDOWN_SEC", 20)),
-    )
-    db.session.add(check)
+    if is_route_deviation:
+        from app.services.sos_service import create_sos_alert
+        dev_m = candidate.get("details", {}).get("deviation_m", 0)
+        reason = f"Automatic SOS: User deviated from planned safe route ({int(dev_m)}m off path)!"
+        create_sos_alert(
+            journey,
+            sos_type="automatic",
+            reason=reason,
+        )
+    else:
+        check = SafetyCheck(
+            anomaly_id=anomaly.id,
+            journey_id=journey.id,
+            status="pending",
+            countdown_seconds=int(current_app.config.get("SOS_COUNTDOWN_SEC", 20)),
+        )
+        db.session.add(check)
+
     db.session.commit()
     return anomaly
 

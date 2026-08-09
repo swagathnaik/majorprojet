@@ -1077,6 +1077,28 @@ a:hover {
   }
 }
 
+.sr-user-marker-deviated .sr-user-dot {
+  background: #dc2626;
+  border-color: #ffffff;
+  box-shadow: 0 0 12px rgba(220, 38, 38, 0.8);
+}
+
+.sr-user-marker-deviated .sr-user-pulse {
+  background: rgba(220, 38, 38, 0.45);
+  animation: sr-pulse-deviated 1.2s ease-out infinite;
+}
+
+@keyframes sr-pulse-deviated {
+  0% {
+    transform: scale(0.6);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(2.8);
+    opacity: 0;
+  }
+}
+
 .sr-start-dot {
   width: 14px;
   height: 14px;

@@ -19,9 +19,9 @@ import "leaflet/dist/leaflet.css";
 const DEFAULT_CENTER = [12.9716, 77.5946];
 const DEFAULT_ZOOM = 16;
 
-function userIcon() {
+function userIcon(isDeviated = false) {
   return L.divIcon({
-    className: "sr-user-marker",
+    className: `sr-user-marker ${isDeviated ? "sr-user-marker-deviated" : ""}`,
     html: `
       <div class="sr-user-dot-wrap">
         <div class="sr-user-pulse"></div>
@@ -112,7 +112,16 @@ export default function JourneyMap({
   followMode = true,
   status = "active",
   expectedRoute = null,
+  openAnomalies = [],
+  monitoring = null,
+  isDeviated: isDeviatedProp = false,
 }) {
+  const isDeviated =
+    isDeviatedProp ||
+    status === "sos" ||
+    openAnomalies?.some((a) => a.type === "route_deviation") ||
+    (monitoring?.deviation_m != null && monitoring.deviation_m >= 40);
+
   const center = useMemo(() => {
     if (position?.lat != null) return [position.lat, position.lng];
     if (path.length) return [path[path.length - 1].lat, path[path.length - 1].lng];
@@ -130,13 +139,19 @@ export default function JourneyMap({
     [expectedRoute]
   );
 
+  const deviationConnector = useMemo(() => {
+    if (!isDeviated || position?.lat == null || !planned.length) return null;
+    const lastPlanned = planned[planned.length - 1] || planned[0];
+    return [lastPlanned, [position.lat, position.lng]];
+  }, [isDeviated, position, planned]);
+
   const accuracy =
     position?.accuracy != null && position.accuracy > 0
       ? Math.min(position.accuracy, 200)
       : null;
 
   return (
-    <div className={`journey-map-shell status-map-${status}`}>
+    <div className={`journey-map-shell status-map-${status} ${isDeviated ? "map-deviated" : ""}`}>
       <MapContainer
         center={center}
         zoom={DEFAULT_ZOOM}
@@ -161,6 +176,7 @@ export default function JourneyMap({
           planned={planned}
         />
 
+        {/* Planned Route (Dashed Blue) */}
         {planned.length >= 2 && (
           <Polyline
             positions={planned}
@@ -175,15 +191,43 @@ export default function JourneyMap({
           />
         )}
 
+        {/* Outer Red Glow Stroke when Deviated */}
+        {linePositions.length >= 2 && isDeviated && (
+          <Polyline
+            positions={linePositions}
+            pathOptions={{
+              color: "#ef4444",
+              weight: 12,
+              opacity: 0.35,
+              lineJoin: "round",
+              lineCap: "round",
+            }}
+          />
+        )}
+
+        {/* Traveled Path Polyline (Green when normal, Bold Red #dc2626 when deviated) */}
         {linePositions.length >= 2 && (
           <Polyline
             positions={linePositions}
             pathOptions={{
-              color: "#34a853",
-              weight: 5,
+              color: isDeviated ? "#dc2626" : "#34a853",
+              weight: isDeviated ? 6 : 5,
               opacity: 0.95,
               lineJoin: "round",
               lineCap: "round",
+            }}
+          />
+        )}
+
+        {/* Off-Route Deviation Connector Line (Dashed Red) */}
+        {deviationConnector && (
+          <Polyline
+            positions={deviationConnector}
+            pathOptions={{
+              color: "#dc2626",
+              weight: 5,
+              opacity: 0.9,
+              dashArray: "8 8",
             }}
           />
         )}
@@ -210,15 +254,17 @@ export default function JourneyMap({
                 center={[position.lat, position.lng]}
                 radius={accuracy}
                 pathOptions={{
-                  color: "#1a73e8",
-                  fillColor: "#1a73e8",
-                  fillOpacity: 0.12,
-                  weight: 1,
+                  color: isDeviated ? "#dc2626" : "#1a73e8",
+                  fillColor: isDeviated ? "#dc2626" : "#1a73e8",
+                  fillOpacity: isDeviated ? 0.25 : 0.12,
+                  weight: isDeviated ? 2 : 1,
                 }}
               />
             )}
-            <Marker position={[position.lat, position.lng]} icon={userIcon()}>
-              <Popup>You are here</Popup>
+            <Marker position={[position.lat, position.lng]} icon={userIcon(isDeviated)}>
+              <Popup>
+                {isDeviated ? "🚨 Off-Route Deviation Active!" : "You are here"}
+              </Popup>
             </Marker>
           </>
         )}

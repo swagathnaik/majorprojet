@@ -453,6 +453,8 @@ export default function Journey() {
               followMode={followMode}
               status={journey.status}
               expectedRoute={journey.expected_route}
+              openAnomalies={openAnomalies}
+              monitoring={monitoring}
             />
 
             <div className="map-overlay-top">
