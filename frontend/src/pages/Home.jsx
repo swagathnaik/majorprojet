@@ -37,16 +37,7 @@ export default function Home() {
           </Link>
         </div>
 
-        <div className="next-steps">
-          <h2>Pipeline</h2>
-          <ol>
-            <li>Start Safe Journey + GPS ✓</li>
-            <li>Auto-share tracking link ✓</li>
-            <li>Real-time monitoring ✓</li>
-            <li>Anomaly → “Are you safe?” → SOS ✓</li>
-            <li>Trusted contact live view + optional 112 ✓</li>
-          </ol>
-        </div>
+
 
         <button type="button" className="btn btn-ghost" onClick={logout}>
           Logout

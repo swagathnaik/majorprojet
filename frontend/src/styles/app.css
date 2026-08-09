@@ -624,25 +624,42 @@ a:hover {
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 64px);
+  height: calc(100vh - 64px);
+  position: relative;
+  overflow: hidden;
 }
 
 .map-stage {
   position: relative;
   flex: 1;
-  min-height: 520px;
-  background: #dce3ea;
-}
-
-.journey-map-shell,
-.journey-map {
   width: 100%;
   height: 100%;
-  min-height: 520px;
+  background: #dce3ea;
+  overflow: hidden;
 }
 
-.journey-map {
+.journey-map-shell {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.journey-map,
+.journey-map-shell .leaflet-container {
+  width: 100% !important;
+  height: 100% !important;
   z-index: 1;
+}
+
+/* Offset Leaflet controls above the bottom sheet peek bar */
+.journey-live .leaflet-bottom.leaflet-right {
+  bottom: 140px;
+  z-index: 800;
+  transition: bottom 0.35s ease;
 }
 
 .map-overlay-top {

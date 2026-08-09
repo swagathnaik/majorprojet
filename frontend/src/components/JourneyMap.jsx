@@ -55,6 +55,22 @@ function startIcon() {
   });
 }
 
+function MapResizer() {
+  const map = useMap();
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 100);
+    const handleResize = () => map.invalidateSize();
+    window.addEventListener("resize", handleResize);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [map]);
+  return null;
+}
+
 function FollowUser({ position, followMode }) {
   const map = useMap();
   useEffect(() => {
@@ -135,6 +151,7 @@ export default function JourneyMap({
           maxZoom={20}
         />
         <ZoomControl position="bottomright" />
+        <MapResizer />
 
         <FollowUser position={position} followMode={followMode} />
         <FitJourney
