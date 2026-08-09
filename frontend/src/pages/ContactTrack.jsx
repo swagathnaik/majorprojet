@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import JourneyMap from "../components/JourneyMap";
+import JourneyBottomSheet from "../components/JourneyBottomSheet";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api";
 
@@ -101,84 +102,19 @@ export default function ContactTrack() {
             )}
           </div>
 
-          <div className="map-overlay-bottom">
-            <div className="map-info-card">
-              <div className="map-info-row">
-                <span>
-                  Trusted contact view ·{" "}
-                  <strong>{data.contact?.name || "Contact"}</strong>
-                </span>
-                <span>{data.location_count || 0} pts</span>
-              </div>
-
-              {sos ? (
-                <div className="alert alert-sos contact-sos">
-                  <strong>SOS ACTIVE</strong>
-                  <div>Reason: {sos.trigger_reason || sos.type}</div>
-                  <div className="muted tiny">
-                    {sos.type} · {sos.created_at
-                      ? new Date(sos.created_at).toLocaleString()
-                      : ""}
-                  </div>
-                  {sos.lat != null && (
-                    <div className="mono tiny">
-                      {sos.lat.toFixed(5)}, {sos.lng.toFixed(5)}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="map-ok">No active SOS — journey monitoring.</div>
-              )}
-
-              {monitoring && (
-                <div className="monitor-grid contact-mon">
-                  <div>
-                    <span className="label">Movement</span>
-                    <p>{monitoring.movement_status}</p>
-                  </div>
-                  <div>
-                    <span className="label">Speed</span>
-                    <p>
-                      {monitoring.speed_kmh != null
-                        ? `${monitoring.speed_kmh} km/h`
-                        : "—"}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="label">Stop</span>
-                    <p>{monitoring.stop_duration_sec ?? 0}s</p>
-                  </div>
-                  <div>
-                    <span className="label">Off route</span>
-                    <p>
-                      {monitoring.deviation_m != null
-                        ? `${Math.round(monitoring.deviation_m)} m`
-                        : "—"}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {position && (
-                <div className="map-info-coords mono">
-                  Live: {position.lat.toFixed(5)}, {position.lng.toFixed(5)}
-                </div>
-              )}
-
-              <div className="journey-controls map-controls">
-                <a className="btn" href="tel:112">
-                  Call 112 (optional)
-                </a>
-                <button type="button" className="btn btn-ghost" onClick={load}>
-                  Refresh
-                </button>
-              </div>
-              <p className="map-attrib muted">
-                {emergency?.note || "SafeRoute does not auto-dial emergency services."}{" "}
-                Auto-refresh 5s.
-              </p>
-            </div>
-          </div>
+          <JourneyBottomSheet
+            isContactView={true}
+            journey={journey}
+            monitoring={monitoring}
+            sosAlert={sos}
+            mapPosition={position}
+            position={position}
+            load={load}
+            emergency={emergency}
+            traveler={traveler}
+            contactName={data.contact?.name}
+            locationCount={data.location_count}
+          />
         </div>
       </section>
     </main>

@@ -288,10 +288,12 @@ def _deliver(payload: dict, contact: EmergencyContact | None) -> dict:
         else:
             channels.append("sms_stub")
 
-    smtp_to = current_app.config.get("NOTIFY_EMAIL_TO") or ""
+    contact_email = getattr(contact, "email", None) if contact else None
+    smtp_to = contact_email or current_app.config.get("NOTIFY_EMAIL_TO") or ""
     if current_app.config.get("NOTIFY_SMTP_HOST") and smtp_to:
         try:
-            _send_smtp(smtp_to, payload.get("event", "SafeRoute"), payload["message"])
+            subject = "🚨 EMERGENCY SOS ALERT - SafeRoute" if payload.get("event") == "sos_alert" else f"SafeRoute: {payload.get('traveler')} shared a journey"
+            _send_smtp(smtp_to, subject, payload["message"], html_body=_build_html_email(payload))
             channels.append("email")
             smtp_ok = True
         except Exception as err:  # noqa: BLE001 – demo resilient
@@ -312,7 +314,54 @@ def _deliver(payload: dict, contact: EmergencyContact | None) -> dict:
     }
 
 
-def _send_smtp(to_addr: str, subject: str, body: str) -> None:
+def _build_html_email(payload: dict) -> str:
+    """Generate HTML email body for emergency alerts and journey notifications."""
+    traveler = payload.get("traveler") or "Traveler"
+    share_url = payload.get("share_url") or "#"
+    event = payload.get("event")
+
+    if event == "sos_alert":
+        reason = payload.get("reason") or "Emergency alert triggered"
+        loc = f"{payload['lat']:.5f}, {payload['lng']:.5f}" if payload.get("lat") is not None and payload.get("lng") is not None else "Location updating..."
+        return f"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 2px solid #e53e3e; border-radius: 8px; background-color: #fff5f5;">
+            <h2 style="color: #c53030; margin-top: 0;">🚨 EMERGENCY SOS ALERT</h2>
+            <p style="font-size: 16px; color: #2d3748;">
+                <strong>{traveler}</strong> has triggered an emergency SOS alert on SafeRoute!
+            </p>
+            <div style="background-color: #ffffff; padding: 15px; border-radius: 6px; border: 1px solid #feb2b2; margin: 15px 0;">
+                <p style="margin: 5px 0;"><strong>Reason:</strong> {reason}</p>
+                <p style="margin: 5px 0;"><strong>Current Coordinates:</strong> {loc}</p>
+                <p style="margin: 5px 0;"><strong>Time:</strong> {payload.get('at', '')}</p>
+            </div>
+            <div style="text-align: center; margin: 25px 0;">
+                <a href="{share_url}" style="background-color: #e53e3e; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; display: inline-block;">
+                    📍 TRACK LIVE LOCATION NOW
+                </a>
+            </div>
+            <p style="font-size: 12px; color: #718096; text-align: center;">
+                SafeRoute Personal Journey Safety System
+            </p>
+        </div>
+        """
+    
+    dest = payload.get("destination") or "their destination"
+    return f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px; background-color: #f7fafc;">
+        <h2 style="color: #2b6cb0; margin-top: 0;">🗺️ Safe Journey Started</h2>
+        <p style="font-size: 16px; color: #2d3748;">
+            <strong>{traveler}</strong> has started a Safe Journey to <strong>{dest}</strong>.
+        </p>
+        <div style="text-align: center; margin: 25px 0;">
+            <a href="{share_url}" style="background-color: #3182ce; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+                View Live Journey Map
+            </a>
+        </div>
+    </div>
+    """
+
+
+def _send_smtp(to_addr: str, subject: str, body: str, html_body: str | None = None) -> None:
     host = current_app.config["NOTIFY_SMTP_HOST"]
     port = int(current_app.config.get("NOTIFY_SMTP_PORT", 587))
     user = current_app.config.get("NOTIFY_SMTP_USER") or ""
@@ -320,16 +369,19 @@ def _send_smtp(to_addr: str, subject: str, body: str) -> None:
     from_addr = current_app.config.get("NOTIFY_SMTP_FROM") or user or "saferoute@localhost"
 
     msg = EmailMessage()
-    msg["Subject"] = f"[SafeRoute] {subject}"
+    msg["Subject"] = subject if subject.startswith("[SafeRoute]") else f"[SafeRoute] {subject}"
     msg["From"] = from_addr
     msg["To"] = to_addr
     msg.set_content(body)
+    if html_body:
+        msg.add_alternative(html_body, subtype="html")
 
     with smtplib.SMTP(host, port, timeout=12) as smtp:
         smtp.starttls()
         if user and password:
             smtp.login(user, password)
         smtp.send_message(msg)
+
 
 
 def _append_log(payload: dict) -> None:

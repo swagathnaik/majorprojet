@@ -7,6 +7,7 @@ import MonitoringPanel from "../components/MonitoringPanel";
 import AnomalyBanner from "../components/AnomalyBanner";
 import SafetyModal from "../components/SafetyModal";
 import SafeRoutePlanner from "../components/SafeRoutePlanner";
+import JourneyBottomSheet from "../components/JourneyBottomSheet";
 import {
   enqueueOffline,
   flushOfflineQueue,
@@ -471,138 +472,32 @@ export default function Journey() {
               </button>
             </div>
 
-            <div className="map-overlay-bottom">
-              <div className="map-info-card">
-                <div className="map-info-row">
-                  <span>
-                    Contact: <strong>{journey.contact?.name || "—"}</strong>
-                  </span>
-                  <span>{serverCount} pts</span>
-                </div>
-
-                {shareUrl && (
-                  <div className="share-box">
-                    <div className="share-label">Shared tracking link</div>
-                    <div className="share-row">
-                      <input readOnly value={shareUrl} className="share-input" />
-                      <button
-                        type="button"
-                        className="btn btn-ghost"
-                        onClick={copyShareLink}
-                      >
-                        {shareCopied ? "Copied" : "Copy"}
-                      </button>
-                      <a
-                        className="btn btn-ghost"
-                        href={shareUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Open
-                      </a>
-                    </div>
-                  </div>
-                )}
-
-                {mapPosition && (
-                  <div className="map-info-coords mono">
-                    {mapPosition.lat.toFixed(5)}, {mapPosition.lng.toFixed(5)}
-                    {position?.accuracy != null
-                      ? ` · ±${Math.round(position.accuracy)}m`
-                      : ""}
-                  </div>
-                )}
-                {error && <div className="map-error">{error}</div>}
-                {geoError && isLive && (
-                  <div className="map-error">{geoError}</div>
-                )}
-                {statusMsg && <div className="map-ok">{statusMsg}</div>}
-                {offlinePending > 0 && (
-                  <div className="map-error">
-                    Offline queue: {offlinePending} item(s) waiting to sync
-                  </div>
-                )}
-                {sosAlert && (
-                  <div className="map-error">
-                    SOS active — alert #{sosAlert.id} · emergency contacts notified
-                    {sosAlert.trigger_reason
-                      ? ` · ${sosAlert.trigger_reason}`
-                      : ""}
-                  </div>
-                )}
-
-                <AnomalyBanner
-                  anomalies={openAnomalies}
-                  safetyCheck={safetyCheck}
-                  onSimulate={
-                    journey.status === "active" || journey.status === "paused"
-                      ? simulateAnomaly
-                      : null
-                  }
-                  simulating={simulating}
-                />
-
-                <MonitoringPanel monitoring={monitoring} />
-
-                <div className="journey-controls map-controls">
-                  {journey.status === "active" && (
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      disabled={busy}
-                      onClick={() => runAction("pause")}
-                    >
-                      Pause
-                    </button>
-                  )}
-                  {journey.status === "paused" && (
-                    <button
-                      type="button"
-                      className="btn"
-                      disabled={busy}
-                      onClick={() => runAction("resume")}
-                    >
-                      Resume
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className={`btn btn-ghost ${followMode ? "btn-follow-on" : ""}`}
-                    onClick={() => setFollowMode((v) => !v)}
-                  >
-                    {followMode ? "Following" : "Follow me"}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn"
-                    disabled={busy}
-                    onClick={() => runAction("end")}
-                  >
-                    End
-                  </button>
-                  {(journey.status === "active" ||
-                    journey.status === "paused") && (
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      disabled={busy}
-                      onClick={() => runAction("cancel")}
-                    >
-                      Cancel
-                    </button>
-                  )}
-                  {journey.status === "sos" && (
-                    <a className="btn" href="tel:112">
-                      Call 112
-                    </a>
-                  )}
-                </div>
-                <p className="map-attrib muted">
-                  GPS: {permissionState} · {intervalSec}s sync · share auto-sent
-                  to {journey.contact?.name || "contact"}
-                </p>
-              </div>
-            </div>
+            <JourneyBottomSheet
+              journey={journey}
+              monitoring={monitoring}
+              openAnomalies={openAnomalies}
+              safetyCheck={safetyCheck}
+              sosAlert={sosAlert}
+              serverCount={serverCount}
+              shareUrl={shareUrl}
+              shareCopied={shareCopied}
+              copyShareLink={copyShareLink}
+              mapPosition={mapPosition}
+              position={position}
+              error={error}
+              geoError={geoError}
+              statusMsg={statusMsg}
+              offlinePending={offlinePending}
+              permissionState={permissionState}
+              intervalSec={intervalSec}
+              followMode={followMode}
+              setFollowMode={setFollowMode}
+              triggerSos={triggerSos}
+              runAction={runAction}
+              simulateAnomaly={simulateAnomaly}
+              simulating={simulating}
+              busy={busy}
+            />
           </div>
         </section>
       )}
