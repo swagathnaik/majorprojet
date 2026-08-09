@@ -1558,9 +1558,13 @@ a:hover {
 
 .profile-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.25rem 1.5rem;
   margin: 1.5rem 0;
+}
+
+.profile-grid > div {
+  min-width: 0;
 }
 
 .label {
@@ -1575,6 +1579,8 @@ a:hover {
 .profile-grid p {
   margin: 0;
   font-weight: 600;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .next-steps {
