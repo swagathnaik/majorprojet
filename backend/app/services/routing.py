@@ -22,11 +22,187 @@ USER_AGENT = "SafeRouteAcademicDemo/1.0 (student project)"
 OSRM_PROFILES = ("driving", "foot")
 
 
+GEOCODE_CACHE: dict[str, list[dict]] = {}
+
+PRESET_LOCATIONS: list[dict] = [
+    {
+        "label": "Acharya Institutes, Soladevanahalli, Hesaraghatta Main Rd, Bengaluru",
+        "lat": 13.0837,
+        "lng": 77.4857,
+        "type": "education",
+        "keywords": ["acharya", "acharya institute", "soladevanahalli", "acharya college", "soladevanahali", "acharyainstitutes"],
+    },
+    {
+        "label": "Soladevanahalli, Yelahanka Hobli, Bengaluru Urban, Karnataka",
+        "lat": 13.0868,
+        "lng": 77.4876,
+        "type": "suburb",
+        "keywords": ["soladevanahalli", "soladevanahali", "soladevanahallii", "solad"],
+    },
+    {
+        "label": "Acharya Lake, Soladevanahalli, Bengaluru",
+        "lat": 13.0850,
+        "lng": 77.4830,
+        "type": "water",
+        "keywords": ["acharya lake", "acharya water", "hesaraghatta lake"],
+    },
+    {
+        "label": "Chikkabanavara Railway Station, Bengaluru",
+        "lat": 13.0760,
+        "lng": 77.5090,
+        "type": "station",
+        "keywords": ["chikkabanavara", "chikkabanavara station"],
+    },
+    {
+        "label": "Yelahanka New Town, Bengaluru, Karnataka",
+        "lat": 13.0995,
+        "lng": 77.5925,
+        "type": "suburb",
+        "keywords": ["yelahanka", "yelahanka new town", "yelahanka station"],
+    },
+    {
+        "label": "IISc (Indian Institute of Science), Malleshwaram, Bengaluru",
+        "lat": 13.0184,
+        "lng": 77.5682,
+        "type": "education",
+        "keywords": ["iisc", "indian institute of science", "malleshwaram"],
+    },
+    {
+        "label": "KSR Bengaluru City Railway Station (Majestic), Bengaluru",
+        "lat": 12.9781,
+        "lng": 77.5697,
+        "type": "station",
+        "keywords": ["majestic", "ksr bengaluru", "railway station", "bangalore station"],
+    },
+    {
+        "label": "MG Road Metro Station, Mahatma Gandhi Rd, Bengaluru",
+        "lat": 12.9756,
+        "lng": 77.6066,
+        "type": "station",
+        "keywords": ["mg road", "brigade road", "mg road metro"],
+    },
+    {
+        "label": "Indiranagar 100 Feet Road, Bengaluru",
+        "lat": 12.9784,
+        "lng": 77.6408,
+        "type": "suburb",
+        "keywords": ["indiranagar", "100ft road"],
+    },
+    {
+        "label": "Koramangala 5th Block, Bengaluru",
+        "lat": 12.9352,
+        "lng": 77.6245,
+        "type": "suburb",
+        "keywords": ["koramangala", "koramangala 5th block"],
+    },
+    {
+        "label": "ITPL (International Tech Park), Whitefield, Bengaluru",
+        "lat": 12.9863,
+        "lng": 77.7381,
+        "type": "commercial",
+        "keywords": ["whitefield", "itpl", "tech park"],
+    },
+    {
+        "label": "Electronic City Phase 1, Bengaluru",
+        "lat": 12.8452,
+        "lng": 77.6602,
+        "type": "suburb",
+        "keywords": ["electronic city", "e-city", "ecity"],
+    },
+    {
+        "label": "Kempegowda International Airport (BLR), Devanahalli, Bengaluru",
+        "lat": 13.1986,
+        "lng": 77.7066,
+        "type": "airport",
+        "keywords": ["airport", "blr airport", "kempegowda airport", "devanahalli"],
+    },
+    {
+        "label": "Hebbal Flyover / Lake, Bengaluru",
+        "lat": 13.0358,
+        "lng": 77.5970,
+        "type": "suburb",
+        "keywords": ["hebbal", "hebbal flyover", "hebbal lake"],
+    },
+    {
+        "label": "Rajajinagar, Bengaluru",
+        "lat": 12.9982,
+        "lng": 77.5530,
+        "type": "suburb",
+        "keywords": ["rajajinagar"],
+    },
+    {
+        "label": "Jayanagar 4th Block, Bengaluru",
+        "lat": 12.9299,
+        "lng": 77.5824,
+        "type": "suburb",
+        "keywords": ["jayanagar"],
+    },
+    {
+        "label": "BTM Layout 2nd Stage, Bengaluru",
+        "lat": 12.9166,
+        "lng": 77.6101,
+        "type": "suburb",
+        "keywords": ["btm", "btm layout"],
+    },
+    {
+        "label": "HSR Layout, Bengaluru",
+        "lat": 12.9121,
+        "lng": 77.6446,
+        "type": "suburb",
+        "keywords": ["hsr", "hsr layout"],
+    },
+    {
+        "label": "Marathahalli Bridge, Outer Ring Rd, Bengaluru",
+        "lat": 12.9592,
+        "lng": 77.6974,
+        "type": "suburb",
+        "keywords": ["marathahalli"],
+    },
+    {
+        "label": "Mysore Palace, Sayyaji Rao Rd, Mysuru, Karnataka",
+        "lat": 12.3052,
+        "lng": 76.6552,
+        "type": "tourism",
+        "keywords": ["mysore", "mysuru", "mysore palace"],
+    },
+]
+
+
 def geocode_search(query: str, limit: int = 5) -> list[dict]:
-    """Search places via Nominatim with robust fallback."""
-    q = (query or "").strip()
-    if not q:
+    """Search places via local preset database + Nominatim with caching."""
+    q = (query or "").strip().lower()
+    if not q or len(q) < 2:
         return []
+
+    # Check local preset landmarks first for instant 0ms response
+    preset_matches: list[dict] = []
+    seen_labels = set()
+
+    for item in PRESET_LOCATIONS:
+        # Match label substring or any keyword
+        label_lower = item["label"].lower()
+        keywords = item.get("keywords", [])
+        if q in label_lower or any(q in kw for kw in keywords):
+            entry = {
+                "label": item["label"],
+                "lat": item["lat"],
+                "lng": item["lng"],
+                "type": item.get("type", "location"),
+            }
+            if entry["label"] not in seen_labels:
+                preset_matches.append(entry)
+                seen_labels.add(entry["label"])
+
+    # Check in-memory cache
+    cache_key = q
+    if cache_key in GEOCODE_CACHE:
+        cached = GEOCODE_CACHE[cache_key]
+        combined = list(preset_matches)
+        for c in cached:
+            if c["label"] not in seen_labels:
+                combined.append(c)
+                seen_labels.add(c["label"])
+        return combined[:limit]
 
     # Attempt 1: Regional search with expanded Bangalore/KA viewbox
     params = urllib.parse.urlencode(
@@ -40,11 +216,11 @@ def geocode_search(query: str, limit: int = 5) -> list[dict]:
             "bounded": 0,
         }
     )
-    rows = _http_get_json(f"{NOMINATIM_URL}?{params}", timeout=10) or []
+    rows = _http_get_json(f"{NOMINATIM_URL}?{params}", timeout=8) or []
 
     # Attempt 2: Fallback without viewbox (search anywhere in India)
     if not isinstance(rows, list) or len(rows) == 0:
-        query_in = q if ("india" in q.lower() or "karnataka" in q.lower() or "bangalore" in q.lower()) else f"{q}, India"
+        query_in = q if ("india" in q or "karnataka" in q or "bangalore" in q) else f"{q}, India"
         params_in = urllib.parse.urlencode(
             {
                 "q": query_in,
@@ -54,7 +230,7 @@ def geocode_search(query: str, limit: int = 5) -> list[dict]:
                 "countrycodes": "in",
             }
         )
-        rows = _http_get_json(f"{NOMINATIM_URL}?{params_in}", timeout=10) or []
+        rows = _http_get_json(f"{NOMINATIM_URL}?{params_in}", timeout=8) or []
 
     # Attempt 3: Global search fallback
     if not isinstance(rows, list) or len(rows) == 0:
@@ -66,27 +242,34 @@ def geocode_search(query: str, limit: int = 5) -> list[dict]:
                 "limit": max(1, min(limit, 8)),
             }
         )
-        rows = _http_get_json(f"{NOMINATIM_URL}?{params_global}", timeout=10) or []
+        rows = _http_get_json(f"{NOMINATIM_URL}?{params_global}", timeout=8) or []
 
-    if not isinstance(rows, list):
-        return []
+    api_results = []
+    if isinstance(rows, list):
+        for row in rows:
+            try:
+                label = row.get("display_name")
+                if label:
+                    api_results.append(
+                        {
+                            "label": label,
+                            "lat": float(row["lat"]),
+                            "lng": float(row["lon"]),
+                            "type": row.get("type"),
+                        }
+                    )
+            except (KeyError, TypeError, ValueError):
+                continue
 
-    results = []
-    for row in rows:
-        try:
-            label = row.get("display_name")
-            if label:
-                results.append(
-                    {
-                        "label": label,
-                        "lat": float(row["lat"]),
-                        "lng": float(row["lon"]),
-                        "type": row.get("type"),
-                    }
-                )
-        except (KeyError, TypeError, ValueError):
-            continue
-    return results
+    GEOCODE_CACHE[cache_key] = api_results
+
+    combined = list(preset_matches)
+    for c in api_results:
+        if c["label"] not in seen_labels:
+            combined.append(c)
+            seen_labels.add(c["label"])
+
+    return combined[:limit]
 
 
 def fetch_safer_routes(

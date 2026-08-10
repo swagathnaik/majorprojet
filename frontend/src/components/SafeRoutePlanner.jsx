@@ -235,7 +235,15 @@ export default function SafeRoutePlanner({
             )}
           </div>
 
-          {suggestions.length > 0 && (
+          {searching && (
+            <ul className="gmaps-suggest">
+              <li style={{ padding: "0.75rem 1rem", color: "#64748b", fontSize: "0.88rem" }}>
+                Searching places…
+              </li>
+            </ul>
+          )}
+
+          {!searching && query.trim().length >= 2 && suggestions.length > 0 && (
             <ul className="gmaps-suggest">
               {suggestions.map((s) => (
                 <li key={`${s.lat}-${s.lng}-${s.label}`}>
@@ -245,6 +253,14 @@ export default function SafeRoutePlanner({
                   </button>
                 </li>
               ))}
+            </ul>
+          )}
+
+          {!searching && query.trim().length >= 2 && suggestions.length === 0 && !destination && (
+            <ul className="gmaps-suggest">
+              <li style={{ padding: "0.75rem 1rem", color: "#94a3b8", fontSize: "0.85rem" }}>
+                No places found for "{query}". Try typing college or landmark name.
+              </li>
             </ul>
           )}
         </div>
