@@ -1943,27 +1943,4 @@ a:hover {
     margin-bottom: 0.4rem;
     padding: 0 0.75rem;
   }
-}
-
-color: #ffffff !important;
-font-weight: 700;
-text-decoration: none;
-}
-
-/* Responsive tweaks for mobile devices */
-@media (max-width: 640px) {
-  .bottom-sheet-container.expanded {
-    max-height: 88vh;
-    border-top-left-radius: 20px;
-    border-top-right-radius: 20px;
-  }
-
-  .peek-stats-chips {
-    display: none;
-  }
-
-  .floating-map-actions {
-    margin-bottom: 0.4rem;
-    padding: 0 0.75rem;
-  }
-}
+}
