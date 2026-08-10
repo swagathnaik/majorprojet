@@ -22,6 +22,7 @@ export default function SafetyModal({
   const [secondsLeft, setSecondsLeft] = useState(0);
   const timedOutRef = useRef(false);
   const phaseRef = useRef("ask");
+  const currentCheckIdRef = useRef(null);
 
   const responseWindow = safetyCheck?.response_window_sec ?? 40;
   const countdownSec = safetyCheck?.countdown_seconds ?? 20;
@@ -32,17 +33,24 @@ export default function SafetyModal({
     phaseRef.current = phase;
   }, [phase]);
 
-  // Reset when a new safety check appears
+  // Reset ONLY when a genuinely new safety check ID appears
   useEffect(() => {
-    if (!safetyCheck || safetyCheck.status !== "pending") return;
-    timedOutRef.current = false;
-    setPhase("ask");
-    phaseRef.current = "ask";
-    const remaining = Math.max(
-      1,
-      safetyCheck.response_deadline_sec ?? responseWindow
-    );
-    setSecondsLeft(remaining);
+    if (!safetyCheck || safetyCheck.status !== "pending") {
+      currentCheckIdRef.current = null;
+      return;
+    }
+
+    if (currentCheckIdRef.current !== checkId) {
+      currentCheckIdRef.current = checkId;
+      timedOutRef.current = false;
+      setPhase("ask");
+      phaseRef.current = "ask";
+      const remaining = Math.max(
+        1,
+        safetyCheck.response_deadline_sec ?? responseWindow
+      );
+      setSecondsLeft(remaining);
+    }
   }, [checkId, safetyCheck, responseWindow]);
 
   // Tick every second
@@ -54,7 +62,7 @@ export default function SafetyModal({
     }, 1000);
 
     return () => clearInterval(id);
-  }, [safetyCheck, checkId, busy]);
+  }, [checkId, safetyCheck?.status, busy]);
 
   // Handle hitting zero
   useEffect(() => {
@@ -72,7 +80,7 @@ export default function SafetyModal({
       timedOutRef.current = true;
       onTimeout?.();
     }
-  }, [secondsLeft, safetyCheck, busy, countdownSec, onTimeout]);
+  }, [secondsLeft, safetyCheck?.status, busy, countdownSec, onTimeout]);
 
   if (!safetyCheck || safetyCheck.status !== "pending") return null;
 

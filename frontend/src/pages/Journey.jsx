@@ -202,7 +202,7 @@ export default function Journey() {
       setFollowMode(true);
       setStatusMsg(
         data.message ||
-          "Safe Journey started. Tracking link shared with trusted contact."
+        "Safe Journey started. Tracking link shared with trusted contact."
       );
     } catch (err) {
       setError(err.message || "Could not start journey.");
@@ -408,10 +408,10 @@ export default function Journey() {
   const destination =
     journey?.dest_lat != null && journey?.dest_lng != null
       ? {
-          lat: journey.dest_lat,
-          lng: journey.dest_lng,
-          label: journey.dest_label,
-        }
+        lat: journey.dest_lat,
+        lng: journey.dest_lng,
+        label: journey.dest_label,
+      }
       : null;
 
   const startPoint =
@@ -453,8 +453,6 @@ export default function Journey() {
               followMode={followMode}
               status={journey.status}
               expectedRoute={journey.expected_route}
-              openAnomalies={openAnomalies}
-              monitoring={monitoring}
             />
 
             <div className="map-overlay-top">

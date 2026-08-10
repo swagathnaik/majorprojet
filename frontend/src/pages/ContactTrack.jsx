@@ -84,8 +84,6 @@ export default function ContactTrack() {
             followMode={true}
             status={journey.status}
             expectedRoute={journey.expected_route}
-            monitoring={monitoring}
-            isDeviated={Boolean(sos)}
           />
 
           <div className="map-overlay-top">
