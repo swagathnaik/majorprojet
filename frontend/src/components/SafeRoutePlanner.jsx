@@ -97,7 +97,7 @@ export default function SafeRoutePlanner({
       } finally {
         setSearching(false);
       }
-    }, 350);
+    }, 250);
   }
 
   async function selectSuggestion(item) {

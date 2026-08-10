@@ -23,11 +23,12 @@ OSRM_PROFILES = ("driving", "foot")
 
 
 def geocode_search(query: str, limit: int = 5) -> list[dict]:
-    """Search places via Nominatim."""
+    """Search places via Nominatim with robust fallback."""
     q = (query or "").strip()
     if not q:
         return []
 
+    # Attempt 1: Regional search with expanded Bangalore/KA viewbox
     params = urllib.parse.urlencode(
         {
             "q": q,
@@ -35,25 +36,54 @@ def geocode_search(query: str, limit: int = 5) -> list[dict]:
             "addressdetails": 1,
             "limit": max(1, min(limit, 8)),
             "countrycodes": "in",
-            "viewbox": "77.35,13.15,77.85,12.75",
+            "viewbox": "77.10,13.45,78.15,12.45",
             "bounded": 0,
         }
     )
-    rows = _http_get_json(f"{NOMINATIM_URL}?{params}", timeout=12) or []
+    rows = _http_get_json(f"{NOMINATIM_URL}?{params}", timeout=10) or []
+
+    # Attempt 2: Fallback without viewbox (search anywhere in India)
+    if not isinstance(rows, list) or len(rows) == 0:
+        query_in = q if ("india" in q.lower() or "karnataka" in q.lower() or "bangalore" in q.lower()) else f"{q}, India"
+        params_in = urllib.parse.urlencode(
+            {
+                "q": query_in,
+                "format": "json",
+                "addressdetails": 1,
+                "limit": max(1, min(limit, 8)),
+                "countrycodes": "in",
+            }
+        )
+        rows = _http_get_json(f"{NOMINATIM_URL}?{params_in}", timeout=10) or []
+
+    # Attempt 3: Global search fallback
+    if not isinstance(rows, list) or len(rows) == 0:
+        params_global = urllib.parse.urlencode(
+            {
+                "q": q,
+                "format": "json",
+                "addressdetails": 1,
+                "limit": max(1, min(limit, 8)),
+            }
+        )
+        rows = _http_get_json(f"{NOMINATIM_URL}?{params_global}", timeout=10) or []
+
     if not isinstance(rows, list):
         return []
 
     results = []
     for row in rows:
         try:
-            results.append(
-                {
-                    "label": row.get("display_name"),
-                    "lat": float(row["lat"]),
-                    "lng": float(row["lon"]),
-                    "type": row.get("type"),
-                }
-            )
+            label = row.get("display_name")
+            if label:
+                results.append(
+                    {
+                        "label": label,
+                        "lat": float(row["lat"]),
+                        "lng": float(row["lon"]),
+                        "type": row.get("type"),
+                    }
+                )
         except (KeyError, TypeError, ValueError):
             continue
     return results
