@@ -19,6 +19,7 @@ export default function Navbar() {
             <button type="button" className="link-btn" onClick={logout}>
               Logout
             </button>
+
           </>
         ) : (
           <>

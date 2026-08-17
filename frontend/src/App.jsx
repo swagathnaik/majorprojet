@@ -10,6 +10,7 @@ import Contacts from "./pages/Contacts";
 import Track from "./pages/Track";
 import Journey from "./pages/Journey";
 import ContactTrack from "./pages/ContactTrack";
+import Feedback from "./pages/Feedback";
 import "./styles/app.css";
 
 export default function App() {
@@ -47,6 +48,14 @@ export default function App() {
               }
             />
             <Route
+              path="/feedback"
+              element={
+                <ProtectedRoute>
+                  <Feedback />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/track"
               element={
                 <ProtectedRoute>
@@ -62,3 +71,4 @@ export default function App() {
     </AuthProvider>
   );
 }
+

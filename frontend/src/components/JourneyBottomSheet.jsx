@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { Link } from "react-router-dom";
 import MonitoringPanel from "./MonitoringPanel";
 import AnomalyBanner from "./AnomalyBanner";
 
@@ -401,6 +402,8 @@ export default function JourneyBottomSheet({
                   </a>
                 )}
               </>
+
+
             )}
 
             {isContactView && (

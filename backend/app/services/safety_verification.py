@@ -155,6 +155,36 @@ def timeout_safety_check(
     }
 
 
+def check_and_trigger_expired_safety_checks(journey_id: int) -> dict | None:
+    """
+    Server-side auto SOS trigger: Check if any pending safety check on the journey
+    has exceeded its combined response window and countdown deadline.
+    If expired, execute timeout_safety_check automatically.
+    """
+    journey = db.session.get(Journey, journey_id)
+    if not journey or journey.status not in ("active", "paused"):
+        return None
+
+    check = get_pending_check(journey_id)
+    if not check:
+        return None
+
+    payload = safety_check_payload(check)
+    response_window = payload.get("response_window_sec", 40)
+    countdown = payload.get("countdown_seconds", 20)
+    total_allowed_sec = response_window + countdown
+
+    elapsed = payload.get("elapsed_sec", 0)
+    if elapsed >= total_allowed_sec:
+        try:
+            return timeout_safety_check(check, journey)
+        except ValueError:
+            return None
+
+    return None
+
+
+
 def _mark_safe(
     check: SafetyCheck,
     journey: Journey,

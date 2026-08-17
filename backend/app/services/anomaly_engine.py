@@ -20,6 +20,7 @@ from app.models.journey import Journey
 from app.models.location import LocationLog
 from app.models.safety_check import SafetyCheck
 from app.services.monitoring import build_monitoring_snapshot
+from app.services.safety_verification import check_and_trigger_expired_safety_checks
 from app.utils.geo import ensure_aware
 
 # Cooldown after user clears / after same type detected
@@ -34,9 +35,13 @@ def evaluate_anomalies(journey: Journey, monitoring: dict | None = None) -> dict
     Run rule-based checks for an active journey.
     Returns { monitoring, open_anomalies, newly_created }.
     """
+    # First, evaluate if any pending safety check has timed out on the server side
+    check_and_trigger_expired_safety_checks(journey.id)
+
     if journey.status not in ("active",):
         # Only evaluate while actively tracking (not paused/sos/ended)
         mon = monitoring or build_monitoring_snapshot(journey)
+
         open_list = _open_anomalies(journey.id)
         return {
             "monitoring": mon,

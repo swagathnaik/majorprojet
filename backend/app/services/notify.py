@@ -3,12 +3,10 @@ Trusted-contact notifications (Phase 10–12).
 
 Demo mode: records notification events (no real SMS gateway required).
 Optional SMTP if NOTIFY_SMTP_* env vars are set.
-Optional Fast2SMS (India) if FAST2SMS_API_KEY is set.
-Optional Twilio SMS if TWILIO_* env vars are set.
+Optional Vonage SMS if VONAGE_* env vars are set.
 """
 from __future__ import annotations
 
-import base64
 import json
 import re
 import smtplib
@@ -151,34 +149,56 @@ def notify_sos_all_contacts(journey: Journey, alert: SosAlert) -> list[dict]:
     return results
 
 
-def _normalize_phone_e164(phone: str) -> str:
-    """Normalize Indian/local numbers to E.164 (+91...) for SMS gateways."""
+def _normalize_phone_e164_digits(phone: str) -> str:
+    """Normalize phone number to international digits for Vonage API (e.g., 919901533228)."""
     digits = re.sub(r"\D", "", phone or "")
-    if not digits:
-        return phone
     if digits.startswith("91") and len(digits) == 12:
-        return f"+{digits}"
+        return digits
     if len(digits) == 10:
-        return f"+91{digits}"
-    if phone.strip().startswith("+"):
-        return phone.strip()
-    return f"+{digits}"
-
-
-def _normalize_phone_india_10(phone: str) -> str:
-    """Extract a 10-digit Indian mobile number for Fast2SMS."""
-    digits = re.sub(r"\D", "", phone or "")
-    if digits.startswith("91") and len(digits) >= 12:
-        digits = digits[-10:]
-    elif len(digits) > 10:
-        digits = digits[-10:]
-    if len(digits) != 10:
-        raise ValueError(f"Invalid Indian mobile number: {phone}")
+        return f"91{digits}"
     return digits
 
 
+def _vonage_configured() -> bool:
+    return bool(
+        current_app.config.get("VONAGE_API_KEY")
+        and current_app.config.get("VONAGE_API_SECRET")
+    )
+
+
+def _send_sms_vonage(to_phone: str, body: str) -> None:
+    api_key = current_app.config["VONAGE_API_KEY"]
+    api_secret = current_app.config["VONAGE_API_SECRET"]
+    from_num = current_app.config.get("VONAGE_FROM_NUMBER") or "Vonage APIs"
+
+    to_num = _normalize_phone_e164_digits(to_phone)
+    url = "https://rest.nexmo.com/sms/json"
+    payload = {
+        "api_key": api_key,
+        "api_secret": api_secret,
+        "from": from_num,
+        "to": to_num,
+        "text": body,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("Content-Type", "application/json")
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw_res = resp.read().decode("utf-8", errors="replace")
+            res_data = json.loads(raw_res) if raw_res else {}
+            messages = res_data.get("messages") or []
+            if messages and messages[0].get("status") != "0":
+                err_text = messages[0].get("error-text", "Unknown Vonage error")
+                raise RuntimeError(f"Vonage SMS error {messages[0].get('status')}: {err_text}")
+    except urllib.error.HTTPError as err:
+        detail = err.read().decode("utf-8", errors="replace")[:200]
+        raise RuntimeError(f"Vonage HTTP {err.code}: {detail}") from err
+
+
 def _sms_text(payload: dict) -> str:
-    """Compact SMS body (Fast2SMS / Twilio character limits)."""
+    """Compact SMS body."""
     if payload.get("event") == "sos_alert":
         traveler = payload.get("traveler") or "Traveler"
         reason = (payload.get("reason") or "emergency")[:100]
@@ -190,103 +210,58 @@ def _sms_text(payload: dict) -> str:
     return (payload.get("message") or "")[:480]
 
 
-def _fast2sms_configured() -> bool:
-    return bool(current_app.config.get("FAST2SMS_API_KEY"))
-
-
-def _send_sms_fast2sms(to_phone: str, body: str) -> None:
-    api_key = current_app.config["FAST2SMS_API_KEY"]
-    numbers = _normalize_phone_india_10(to_phone)
-    url = "https://www.fast2sms.com/dev/bulkV2"
-    data = urllib.parse.urlencode(
-        {
-            "message": body,
-            "route": "q",
-            "language": "english",
-            "numbers": numbers,
-        }
-    ).encode()
-    req = urllib.request.Request(url, data=data, method="POST")
-    req.add_header("authorization", api_key)
-    req.add_header("Content-Type", "application/x-www-form-urlencoded")
-
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as err:
-        detail = err.read().decode("utf-8", errors="replace")[:200]
-        raise RuntimeError(f"Fast2SMS HTTP {err.code}: {detail}") from err
-
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError as err:
-        raise RuntimeError(f"Fast2SMS invalid response: {raw[:200]}") from err
-
-    if not result.get("return"):
-        msg = result.get("message")
-        if isinstance(msg, list):
-            msg = ", ".join(str(m) for m in msg)
-        raise RuntimeError(f"Fast2SMS: {msg or 'send failed'}")
-
-
-def _twilio_configured() -> bool:
-    return bool(
-        current_app.config.get("TWILIO_ACCOUNT_SID")
-        and current_app.config.get("TWILIO_AUTH_TOKEN")
-        and current_app.config.get("TWILIO_FROM_NUMBER")
-    )
-
-
-def _send_sms_twilio(to_phone: str, body: str) -> None:
-    sid = current_app.config["TWILIO_ACCOUNT_SID"]
-    token = current_app.config["TWILIO_AUTH_TOKEN"]
-    from_num = current_app.config["TWILIO_FROM_NUMBER"]
-    to_e164 = _normalize_phone_e164(to_phone)
-
-    url = f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
-    data = urllib.parse.urlencode(
-        {"To": to_e164, "From": from_num, "Body": body}
-    ).encode()
-    auth = base64.b64encode(f"{sid}:{token}".encode()).decode()
-    req = urllib.request.Request(url, data=data, method="POST")
-    req.add_header("Authorization", f"Basic {auth}")
-    req.add_header("Content-Type", "application/x-www-form-urlencoded")
-
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            if resp.status >= 400:
-                raise RuntimeError(f"Twilio HTTP {resp.status}")
-    except urllib.error.HTTPError as err:
-        detail = err.read().decode("utf-8", errors="replace")[:200]
-        raise RuntimeError(f"Twilio error {err.code}: {detail}") from err
-
-
 def _deliver(payload: dict, contact: EmergencyContact | None) -> dict:
-    """Attempt SMS (Twilio) + SMTP if configured; always record a demo receipt."""
+    """
+    Attempt multi-gateway delivery:
+      SMS: Vonage SMS
+      Push/Bot: Telegram -> Discord -> Custom Webhook
+      Email: SMTP
+    Always attaches direct WhatsApp/SMS action URLs for 1-click fallback.
+    """
     channels = ["in_app_log"]
     smtp_ok = False
     sms_ok = False
     sms_provider = None
 
     if contact and contact.phone:
-        if _fast2sms_configured():
+        digits = re.sub(r"\D", "", contact.phone or "")
+        int_phone = f"91{digits}" if len(digits) == 10 else digits
+        msg_text = payload.get("message") or "EMERGENCY SOS ALERT"
+        payload["whatsapp_url"] = f"https://wa.me/{int_phone}?text={urllib.parse.quote(msg_text)}"
+        payload["sms_url"] = f"sms:{digits}?body={urllib.parse.quote(msg_text)}"
+
+        if _vonage_configured() and payload.get("event") == "sos_alert":
             try:
-                _send_sms_fast2sms(contact.phone, _sms_text(payload))
+                _send_sms_vonage(contact.phone, _sms_text(payload))
                 channels.append("sms")
                 sms_ok = True
-                sms_provider = "fast2sms"
-            except Exception as err:  # noqa: BLE001 – demo resilient
-                channels.append(f"sms_failed:fast2sms:{err}")
-        elif _twilio_configured():
-            try:
-                _send_sms_twilio(contact.phone, _sms_text(payload))
-                channels.append("sms")
-                sms_ok = True
-                sms_provider = "twilio"
-            except Exception as err:  # noqa: BLE001 – demo resilient
-                channels.append(f"sms_failed:twilio:{err}")
+                sms_provider = "vonage"
+            except Exception as err:  # noqa: BLE001
+                channels.append(f"sms_failed:vonage:{err}")
+        elif _vonage_configured():
+            channels.append("sms_skipped_journey_started")
         else:
             channels.append("sms_stub")
+
+
+
+    # Free instant notification alternatives: Telegram Bot & Discord Webhook
+    tg_token = current_app.config.get("TELEGRAM_BOT_TOKEN")
+    tg_chat = current_app.config.get("TELEGRAM_CHAT_ID")
+    if tg_token and tg_chat:
+        try:
+            _send_telegram(tg_token, tg_chat, payload.get("message", ""))
+            channels.append("telegram")
+        except Exception as err:  # noqa: BLE001
+            channels.append(f"telegram_failed:{err}")
+
+    discord_url = current_app.config.get("DISCORD_WEBHOOK_URL")
+    if discord_url:
+        try:
+            _send_discord(discord_url, payload.get("message", ""))
+            channels.append("discord")
+        except Exception as err:  # noqa: BLE001
+            channels.append(f"discord_failed:{err}")
 
     contact_email = getattr(contact, "email", None) if contact else None
     smtp_to = contact_email or current_app.config.get("NOTIFY_EMAIL_TO") or ""
@@ -298,6 +273,14 @@ def _deliver(payload: dict, contact: EmergencyContact | None) -> dict:
             smtp_ok = True
         except Exception as err:  # noqa: BLE001 – demo resilient
             channels.append(f"email_failed:{err}")
+
+    webhook_url = current_app.config.get("NOTIFY_WEBHOOK_URL")
+    if webhook_url:
+        try:
+            _send_webhook(webhook_url, payload)
+            channels.append("webhook")
+        except Exception as err:  # noqa: BLE001
+            channels.append(f"webhook_failed:{err}")
 
     network = "online"
     if current_app.config.get("SIMULATE_POOR_NETWORK"):
@@ -312,6 +295,35 @@ def _deliver(payload: dict, contact: EmergencyContact | None) -> dict:
         "network": network,
         "demo": not sms_ok and not smtp_ok,
     }
+
+
+def _send_telegram(token: str, chat_id: str, message: str) -> None:
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    data = urllib.parse.urlencode({"chat_id": chat_id, "text": message}).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST")
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        if resp.status >= 400:
+            raise RuntimeError(f"Telegram HTTP {resp.status}")
+
+
+def _send_discord(url: str, message: str) -> None:
+    data = json.dumps({"content": message}, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        if resp.status >= 400:
+            raise RuntimeError(f"Discord HTTP {resp.status}")
+
+
+def _send_webhook(url: str, payload: dict) -> None:
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        if resp.status >= 400:
+            raise RuntimeError(f"Webhook HTTP {resp.status}")
+
+
 
 
 def _build_html_email(payload: dict) -> str:

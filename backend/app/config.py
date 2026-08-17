@@ -48,10 +48,15 @@ class Config:
     NOTIFY_SMTP_FROM = os.getenv("NOTIFY_SMTP_FROM", "")
     NOTIFY_EMAIL_TO = os.getenv("NOTIFY_EMAIL_TO", "")
 
-    # Optional Twilio SMS to emergency contact phone numbers
-    TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
-    TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
-    TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "")
+    # Vonage SMS to emergency contact phone numbers
+    VONAGE_API_KEY = os.getenv("VONAGE_API_KEY", "")
+    VONAGE_API_SECRET = os.getenv("VONAGE_API_SECRET", "")
+    VONAGE_FROM_NUMBER = os.getenv("VONAGE_FROM_NUMBER", "Vonage APIs")
 
-    # Optional Fast2SMS (India) – free tier at fast2sms.com Dev API
-    FAST2SMS_API_KEY = os.getenv("FAST2SMS_API_KEY", "")
+    # Free instant notification push alternatives (Telegram, Discord, Webhooks)
+
+    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+    DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
+    NOTIFY_WEBHOOK_URL = os.getenv("NOTIFY_WEBHOOK_URL", "")
+

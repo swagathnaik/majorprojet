@@ -35,6 +35,7 @@ def create_app(config_class=Config, config_overrides=None):
     from app.routes.safety import safety_bp
     from app.routes.maps import maps_bp
     from app.routes.share import share_bp
+    from app.routes.feedback import feedback_bp
 
     app.register_blueprint(health_bp)
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
@@ -43,6 +44,8 @@ def create_app(config_class=Config, config_overrides=None):
     app.register_blueprint(safety_bp, url_prefix="/api/safety-checks")
     app.register_blueprint(maps_bp, url_prefix="/api/maps")
     app.register_blueprint(share_bp, url_prefix="/api/share")
+    app.register_blueprint(feedback_bp, url_prefix="/api/feedback")
+
 
     # Create tables on startup (fine for SQLite MVP)
     with app.app_context():

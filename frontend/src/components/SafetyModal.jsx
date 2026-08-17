@@ -10,6 +10,36 @@ const TYPE_LABELS = {
   speed_spike: "Sudden speed change",
 };
 
+function playWarningBeep(freq = 880, duration = 0.3) {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(freq, ctx.currentTime);
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + duration);
+  } catch {
+    /* Ignore audio play failures */
+  }
+}
+
+function triggerVibration(pattern = [200, 100, 200]) {
+  try {
+    if (typeof navigator !== "undefined" && navigator.vibrate) {
+      navigator.vibrate(pattern);
+    }
+  } catch {
+    /* Ignore vibration errors */
+  }
+}
+
 export default function SafetyModal({
   safetyCheck,
   busy = false,
@@ -50,6 +80,7 @@ export default function SafetyModal({
         safetyCheck.response_deadline_sec ?? responseWindow
       );
       setSecondsLeft(remaining);
+      playWarningBeep(587, 0.2);
     }
   }, [checkId, safetyCheck, responseWindow]);
 
@@ -73,14 +104,19 @@ export default function SafetyModal({
       setPhase("countdown");
       phaseRef.current = "countdown";
       setSecondsLeft(countdownSec);
+      playWarningBeep(880, 0.4);
+      triggerVibration([300, 150, 300]);
       return;
     }
 
     if (phaseRef.current === "countdown" && !timedOutRef.current) {
       timedOutRef.current = true;
+      playWarningBeep(1200, 0.6);
+      triggerVibration([500, 200, 500, 200, 500]);
       onTimeout?.();
     }
   }, [secondsLeft, safetyCheck?.status, busy, countdownSec, onTimeout]);
+
 
   if (!safetyCheck || safetyCheck.status !== "pending") return null;
 

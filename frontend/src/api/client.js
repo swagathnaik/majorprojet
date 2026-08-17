@@ -142,6 +142,13 @@ export const shareApi = {
   get: (shareToken) => apiRequest(`/share/${encodeURIComponent(shareToken)}`),
 };
 
+export const feedbackApi = {
+  submit: (token, payload) =>
+    apiRequest("/feedback", { method: "POST", body: payload, token }),
+  list: (token) => apiRequest("/feedback", { token }),
+  retrain: (token) => apiRequest("/feedback/retrain", { method: "POST", token }),
+};
+
 export const healthApi = {
   check: async () => {
     const healthUrl = API_BASE.startsWith("http")
@@ -151,3 +158,4 @@ export const healthApi = {
     return res.json();
   },
 };
+

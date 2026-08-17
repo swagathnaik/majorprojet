@@ -8,6 +8,7 @@ import AnomalyBanner from "../components/AnomalyBanner";
 import SafetyModal from "../components/SafetyModal";
 import SafeRoutePlanner from "../components/SafeRoutePlanner";
 import JourneyBottomSheet from "../components/JourneyBottomSheet";
+import PostJourneyFeedbackModal from "../components/PostJourneyFeedbackModal";
 import {
   enqueueOffline,
   flushOfflineQueue,
@@ -34,6 +35,8 @@ function contactNotifyMessage(notifications, fallback) {
 export default function Journey() {
   const { token } = useAuth();
   const [journey, setJourney] = useState(null);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [endedJourneyData, setEndedJourneyData] = useState(null);
   const [logs, setLogs] = useState([]);
   const [serverCount, setServerCount] = useState(0);
   const [intervalSec, setIntervalSec] = useState(DEFAULT_INTERVAL_SEC);
@@ -183,12 +186,25 @@ export default function Journey() {
     return () => clearInterval(id);
   }, [isLive, journey, position, token, intervalSec]);
 
+function sendBrowserNotification(title, options) {
+  try {
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+      new Notification(title, options);
+    }
+  } catch {
+    /* Ignore browser notification errors */
+  }
+}
+
   async function startJourneyFromPlanner(payload) {
     setBusy(true);
     setError("");
     setStatusMsg("");
     setSosAlert(null);
     setShareCopied(false);
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission().catch(() => {});
+    }
     try {
       const data = await journeysApi.start(token, payload);
       setJourney(data.journey);
@@ -211,6 +227,7 @@ export default function Journey() {
       setBusy(false);
     }
   }
+
 
   async function copyShareLink() {
     if (!shareUrl) return;
@@ -273,6 +290,10 @@ export default function Journey() {
       const data = await journeysApi.sos(token, journey.id, payload);
       setJourney(data.journey);
       setSosAlert(data.sos);
+      sendBrowserNotification("🚨 SafeRoute SOS Triggered", {
+        body: "Emergency SOS activated. Trusted contacts have been automatically notified.",
+        tag: "sos_alert",
+      });
       setStatusMsg(
         contactNotifyMessage(
           data.notifications,
@@ -340,6 +361,10 @@ export default function Journey() {
       setOpenAnomalies([]);
       setJourney(data.journey);
       setSosAlert(data.sos);
+      sendBrowserNotification("🚨 Emergency Help Requested", {
+        body: "SOS alert sent to emergency contacts.",
+        tag: "sos_alert",
+      });
       setStatusMsg(
         contactNotifyMessage(
           data.notifications,
@@ -383,6 +408,10 @@ export default function Journey() {
       setOpenAnomalies([]);
       setJourney(data.journey);
       setSosAlert(data.sos);
+      sendBrowserNotification("🚨 Automatic SOS Triggered", {
+        body: "No response to safety check. Automatic SOS alert sent to trusted contacts.",
+        tag: "sos_alert",
+      });
       setStatusMsg(
         contactNotifyMessage(
           data.notifications,
@@ -433,6 +462,16 @@ export default function Journey() {
           onTimeout={handleSafetyTimeout}
         />
       )}
+
+      {showFeedbackModal && (
+        <PostJourneyFeedbackModal
+          isOpen={showFeedbackModal}
+          onClose={() => setShowFeedbackModal(false)}
+          journey={endedJourneyData || journey}
+          token={token}
+        />
+      )}
+
 
       {!inProgress ? (
         <SafeRoutePlanner

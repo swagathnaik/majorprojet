@@ -6,6 +6,7 @@ from app.models.location import LocationLog
 from app.models.anomaly import Anomaly
 from app.models.safety_check import SafetyCheck
 from app.models.sos import SosAlert
+from app.models.feedback import RouteFeedback
 
 __all__ = [
     "User",
@@ -15,4 +16,6 @@ __all__ = [
     "Anomaly",
     "SafetyCheck",
     "SosAlert",
+    "RouteFeedback",
 ]
+

@@ -197,7 +197,18 @@ def score_route_lnglat(coords_lnglat: list[list[float]]) -> dict:
 
     norm = exposure / max(1, len(samples))
     risk = min(100.0, norm * 48.0)
+
+    # Incorporate AI model retrained user feedback safety adjustments
+    try:
+        from app.services.feedback_service import get_feedback_safety_adjustment
+        fb_sum = sum(get_feedback_safety_adjustment(slat, slng) for slat, slng in samples)
+        fb_adj = fb_sum / max(1, len(samples))
+        risk = max(0.0, min(100.0, risk + (fb_adj * 10.0)))
+    except Exception:
+        pass
+
     safety_score = round(max(0.0, 100.0 - risk), 1)
+
 
     if safety_score >= 75:
         indicator = "lower_historical_risk"

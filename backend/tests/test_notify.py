@@ -1,8 +1,7 @@
 """
-Notification / Fast2SMS tests.
+Notification delivery tests (including Vonage SMS).
 Run: python -m tests.test_notify
 """
-import io
 import json
 import os
 import sys
@@ -24,31 +23,36 @@ def run():
             "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
             "TESTING": True,
             "DEMO_MODE": True,
-            "FAST2SMS_API_KEY": "test-fast2sms-key",
+            "VONAGE_API_KEY": "719be850",
+            "VONAGE_API_SECRET": "test_secret_123",
+            "VONAGE_FROM_NUMBER": "Vonage APIs",
         }
     )
 
     with app.app_context():
-        # --- unit: phone normalization ---
-        assert notify_mod._normalize_phone_india_10("9901533228") == "9901533228"
-        assert notify_mod._normalize_phone_india_10("+91 9901533228") == "9901533228"
-        assert notify_mod._normalize_phone_india_10("919901533228") == "9901533228"
+        # --- unit: phone normalization for Vonage ---
+        assert notify_mod._normalize_phone_e164_digits("9901533228") == "919901533228"
+        assert notify_mod._normalize_phone_e164_digits("+91 9901533228") == "919901533228"
 
-        # --- unit: Fast2SMS send (mocked HTTP) ---
+        # --- unit: Vonage SMS send (mocked HTTP) ---
         mock_resp = MagicMock()
+        mock_resp.status = 200
         mock_resp.read.return_value = json.dumps(
-            {"return": True, "request_id": "abc", "message": ["Message sent successfully"]}
-        ).encode()
+            {"messages": [{"status": "0", "message-id": "12345"}]}
+        ).encode("utf-8")
         mock_resp.__enter__ = lambda s: s
         mock_resp.__exit__ = MagicMock(return_value=False)
 
         with patch("urllib.request.urlopen", return_value=mock_resp) as mock_open:
-            notify_mod._send_sms_fast2sms("9901533228", "SOS test message")
+            notify_mod._send_sms_vonage("9901533228", "SOS test message")
             assert mock_open.called
             req = mock_open.call_args[0][0]
-            assert req.get_header("Authorization") == "test-fast2sms-key"
+            assert "rest.nexmo.com" in req.full_url
+            sent_data = json.loads(req.data.decode("utf-8"))
+            assert sent_data["api_key"] == "719be850"
+            assert sent_data["to"] == "919901533228"
 
-        # --- integration: automatic SOS uses Fast2SMS ---
+        # --- integration: automatic SOS triggers Vonage SMS ---
         client = app.test_client()
         r = client.post(
             "/api/auth/register",
@@ -65,12 +69,46 @@ def run():
             headers=headers,
             json={"dest_label": "Home", "start_lat": 12.97, "start_lng": 77.59},
         )
-        jid = r.get_json()["journey"]["id"]
+        j_res = r.get_json()
+        jid = j_res["journey"]["id"]
+        # Journey start should NOT send SMS via Vonage
+        start_deliv = j_res["share"]["delivery"]
+        assert start_deliv["sms_sent"] is False
+        assert "sms_skipped_journey_started" in start_deliv["channels"]
+
+        # --- integration 1: manual SOS triggers Vonage SMS ---
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            r = client.post(
+                f"/api/journeys/{jid}/sos",
+                headers=headers,
+                json={"reason": "Manual emergency button pressed", "lat": 12.972, "lng": 77.592},
+            )
+        assert r.status_code == 201, r.data
+        manual_body = r.get_json()
+        assert manual_body["sos"]["type"] == "manual"
+        assert len(manual_body["notifications"]) == 1
+        manual_delivery = manual_body["notifications"][0]["delivery"]
+        assert manual_delivery["sms_sent"] is True
+        assert manual_delivery["sms_provider"] == "vonage"
+        assert "sms" in manual_delivery["channels"]
+
+        # End active journey jid so a new one can be started
+        client.post(f"/api/journeys/{jid}/end", headers=headers)
+
+        # --- integration 2: automatic SOS triggers Vonage SMS ---
         r = client.post(
-            f"/api/journeys/{jid}/demo/simulate-anomaly",
+            "/api/journeys",
+            headers=headers,
+            json={"dest_label": "Work", "start_lat": 12.97, "start_lng": 77.59},
+        )
+        jid2 = r.get_json()["journey"]["id"]
+
+        r = client.post(
+            f"/api/journeys/{jid2}/demo/simulate-anomaly",
             headers=headers,
             json={"type": "prolonged_stop"},
         )
+
         check_id = r.get_json()["active_safety_check"]["id"]
 
         with patch("urllib.request.urlopen", return_value=mock_resp):
@@ -85,11 +123,13 @@ def run():
         assert len(body["notifications"]) == 1
         delivery = body["notifications"][0]["delivery"]
         assert delivery["sms_sent"] is True
-        assert delivery["sms_provider"] == "fast2sms"
+        assert delivery["sms_provider"] == "vonage"
         assert "sms" in delivery["channels"]
 
-        print("All notification / Fast2SMS tests passed.")
+
+        print("All Vonage manual and automatic notification tests passed.")
 
 
 if __name__ == "__main__":
     run()
+
