@@ -991,6 +991,65 @@ a:hover {
   }
 }
 
+/* Route Observation Tag Chips */
+.tag-chips-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.8rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #94a3b8;
+  box-shadow: none;
+  transition: all 0.18s ease;
+  user-select: none;
+}
+
+.tag-chip:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #f8fafc;
+  transform: translateY(-1px);
+}
+
+.tag-chip.active {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
+  border-color: #60a5fa !important;
+  color: #ffffff !important;
+  font-weight: 600;
+  box-shadow: 0 0 14px rgba(37, 99, 235, 0.55);
+  transform: scale(1.03);
+}
+
+.tag-chip.active:hover {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
+  box-shadow: 0 0 18px rgba(59, 130, 246, 0.7);
+}
+
+.btn-outline {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  color: #cbd5e1 !important;
+  box-shadow: none !important;
+}
+
+.btn-outline:hover {
+  background: rgba(255, 255, 255, 0.12) !important;
+  border-color: rgba(255, 255, 255, 0.35) !important;
+  color: #ffffff !important;
+}
+
 
 .safety-modal h2 {
   margin: 0.2rem 0 0.65rem;

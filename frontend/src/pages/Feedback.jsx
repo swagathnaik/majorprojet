@@ -144,18 +144,22 @@ export default function Feedback() {
 
             <div className="form-group">
               <label>Safety Characteristics / Tags</label>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginTop: "0.4rem" }}>
-                {SAFETY_TAG_OPTIONS.map((tag) => (
-                  <button
-                    key={tag.id}
-                    type="button"
-                    onClick={() => toggleTag(tag.id)}
-                    className={`btn ${selectedTags.includes(tag.id) ? "btn-primary" : "btn-outline"}`}
-                    style={{ fontSize: "0.85rem", padding: "0.3rem 0.7rem", borderRadius: "20px" }}
-                  >
-                    {tag.label}
-                  </button>
-                ))}
+              <div className="tag-chips-container">
+                {SAFETY_TAG_OPTIONS.map((tag) => {
+                  const isSelected = selectedTags.includes(tag.id);
+                  return (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      onClick={() => toggleTag(tag.id)}
+                      className={`tag-chip ${isSelected ? "active" : ""}`}
+                      aria-pressed={isSelected}
+                    >
+                      <span>{tag.label}</span>
+                      {isSelected && <span style={{ marginLeft: "0.2rem", fontWeight: "bold" }}>✓</span>}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -171,7 +175,7 @@ export default function Feedback() {
             </div>
 
             <button type="submit" className="btn btn-primary" style={{ width: "100%" }} disabled={submitting}>
-              {submitting ? "Submitting & Updating Model..." : "Submit Feedback"}
+              {submitting ? "Submitting..." : "Submit Feedback"}
             </button>
           </form>
         </section>

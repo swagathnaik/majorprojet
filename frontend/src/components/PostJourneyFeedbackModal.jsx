@@ -119,18 +119,22 @@ export default function PostJourneyFeedbackModal({ isOpen, onClose, journey, tok
                 <label style={{ fontSize: "0.85rem", fontWeight: "bold", display: "block", marginBottom: "0.4rem" }}>
                   Select Route Observations (Optional)
                 </label>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
-                  {SAFETY_TAG_OPTIONS.map((tag) => (
-                    <button
-                      key={tag.id}
-                      type="button"
-                      onClick={() => toggleTag(tag.id)}
-                      className={`btn ${selectedTags.includes(tag.id) ? "btn-primary" : "btn-outline"}`}
-                      style={{ fontSize: "0.8rem", padding: "0.25rem 0.6rem", borderRadius: "16px" }}
-                    >
-                      {tag.label}
-                    </button>
-                  ))}
+                <div className="tag-chips-container">
+                  {SAFETY_TAG_OPTIONS.map((tag) => {
+                    const isSelected = selectedTags.includes(tag.id);
+                    return (
+                      <button
+                        key={tag.id}
+                        type="button"
+                        onClick={() => toggleTag(tag.id)}
+                        className={`tag-chip ${isSelected ? "active" : ""}`}
+                        aria-pressed={isSelected}
+                      >
+                        <span>{tag.label}</span>
+                        {isSelected && <span style={{ marginLeft: "0.2rem", fontWeight: "bold" }}>✓</span>}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -154,7 +158,7 @@ export default function PostJourneyFeedbackModal({ isOpen, onClose, journey, tok
                   style={{ flex: 1, fontWeight: "bold" }}
                   disabled={submitting}
                 >
-                  {submitting ? "Retraining AI Model..." : "Submit & Retrain AI Model ⚡"}
+                  {submitting ? "Submitting..." : "Submit Feedback"}
                 </button>
                 <button
                   type="button"

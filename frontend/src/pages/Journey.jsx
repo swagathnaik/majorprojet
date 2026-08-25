@@ -22,10 +22,19 @@ function contactNotifyMessage(notifications, fallback) {
     return fallback;
   }
   const names = notifications.map((n) => n.contact_name).filter(Boolean);
+  const smsFailed = notifications.some((n) =>
+    (n.delivery?.channels || []).some((ch) => String(ch).includes("sms_failed"))
+  );
+  let msg = fallback;
   if (names.length) {
-    return `${fallback} — message sent to ${names.join(", ")}.`;
+    msg = `${fallback} — message sent to ${names.join(", ")}.`;
+  } else {
+    msg = `${fallback} — ${notifications.length} contact(s) notified.`;
   }
-  return `${fallback} — ${notifications.length} contact(s) notified.`;
+  if (smsFailed) {
+    msg += " (Use 📲 WhatsApp / 💬 SMS buttons below for instant 1-click delivery).";
+  }
+  return msg;
 }
 
 /**
@@ -260,6 +269,10 @@ function sendBrowserNotification(title, options) {
         setSosAlert(null);
         setShareUrl("");
       }
+      if (action === "end") {
+        setEndedJourneyData(data.journey);
+        setShowFeedbackModal(true);
+      }
     } catch (err) {
       setError(err.message || "Action failed.");
     } finally {
@@ -466,7 +479,10 @@ function sendBrowserNotification(title, options) {
       {showFeedbackModal && (
         <PostJourneyFeedbackModal
           isOpen={showFeedbackModal}
-          onClose={() => setShowFeedbackModal(false)}
+          onClose={() => {
+            setShowFeedbackModal(false);
+            setEndedJourneyData(null);
+          }}
           journey={endedJourneyData || journey}
           token={token}
         />

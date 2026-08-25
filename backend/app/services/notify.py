@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 import smtplib
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -188,11 +189,13 @@ def _send_sms_vonage(to_phone: str, body: str) -> None:
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw_res = resp.read().decode("utf-8", errors="replace")
             res_data = json.loads(raw_res) if raw_res else {}
+            current_app.logger.info("Vonage SMS API Response: %s", res_data)
             messages = res_data.get("messages") or []
             if messages and messages[0].get("status") != "0":
                 err_text = messages[0].get("error-text", "Unknown Vonage error")
                 raise RuntimeError(f"Vonage SMS error {messages[0].get('status')}: {err_text}")
     except urllib.error.HTTPError as err:
+
         detail = err.read().decode("utf-8", errors="replace")[:200]
         raise RuntimeError(f"Vonage HTTP {err.code}: {detail}") from err
 
@@ -315,13 +318,37 @@ def _send_discord(url: str, message: str) -> None:
             raise RuntimeError(f"Discord HTTP {resp.status}")
 
 
+def _ssl_context() -> ssl.SSLContext | None:
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        pass
+    try:
+        return ssl.create_default_context()
+    except Exception:
+        return ssl._create_unverified_context()
+
+
 def _send_webhook(url: str, payload: dict) -> None:
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(url, data=data, method="POST")
     req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        if resp.status >= 400:
-            raise RuntimeError(f"Webhook HTTP {resp.status}")
+    req.add_header("User-Agent", "SafeRoute-SOS-Notifier/1.0")
+
+    ctx = _ssl_context()
+    try:
+        with urllib.request.urlopen(req, timeout=12, context=ctx) as resp:
+            if resp.status >= 400:
+                raise RuntimeError(f"Webhook HTTP {resp.status}")
+    except urllib.error.URLError as err:
+        if "CERTIFICATE_VERIFY_FAILED" in str(err):
+            unverified_ctx = ssl._create_unverified_context()
+            with urllib.request.urlopen(req, timeout=12, context=unverified_ctx) as resp:
+                if resp.status >= 400:
+                    raise RuntimeError(f"Webhook HTTP {resp.status}")
+        else:
+            raise
 
 
 

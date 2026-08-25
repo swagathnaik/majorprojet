@@ -141,13 +141,14 @@ def _rule_candidates(journey: Journey, mon: dict) -> list[dict]:
             }
         )
 
-    # Rule 2 – significant route deviation (needs dest coords)
+    # Rule 2 – significant route deviation (needs dest coords and active movement)
     deviation = mon.get("deviation_m")
     if (
         deviation is not None
         and deviation >= deviation_threshold
         and journey.dest_lat is not None
         and journey.dest_lng is not None
+        and _has_started_journey_motion(journey.id)
     ):
         candidates.append(
             {
@@ -162,7 +163,10 @@ def _rule_candidates(journey: Journey, mon: dict) -> list[dict]:
         )
 
     # Rule 3 – lost GPS updates while journey active
-    if mon.get("movement_status") == "signal_lost":
+    if (
+        mon.get("movement_status") == "signal_lost"
+        and LocationLog.query.filter_by(journey_id=journey.id).count() >= 3
+    ):
         candidates.append(
             {
                 "type": "lost_signal",
@@ -187,6 +191,14 @@ def _rule_candidates(journey: Journey, mon: dict) -> list[dict]:
         )
 
     return candidates
+
+
+def _has_started_journey_motion(journey_id: int) -> bool:
+    """True if journey has logged at least 3 location points and user has moved."""
+    logs_count = LocationLog.query.filter_by(journey_id=journey_id).count()
+    if logs_count < 3:
+        return False
+    return _had_recent_motion(journey_id)
 
 
 def _had_recent_motion(journey_id: int) -> bool:

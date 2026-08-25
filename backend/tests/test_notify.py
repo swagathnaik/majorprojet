@@ -31,8 +31,8 @@ def run():
 
     with app.app_context():
         # --- unit: phone normalization for Vonage ---
-        assert notify_mod._normalize_phone_e164_digits("9901533228") == "919901533228"
-        assert notify_mod._normalize_phone_e164_digits("+91 9901533228") == "919901533228"
+        assert notify_mod._normalize_phone_e164_digits("9876543210") == "919876543210"
+        assert notify_mod._normalize_phone_e164_digits("+91 9876543210") == "919876543210"
 
         # --- unit: Vonage SMS send (mocked HTTP) ---
         mock_resp = MagicMock()
@@ -44,13 +44,13 @@ def run():
         mock_resp.__exit__ = MagicMock(return_value=False)
 
         with patch("urllib.request.urlopen", return_value=mock_resp) as mock_open:
-            notify_mod._send_sms_vonage("9901533228", "SOS test message")
+            notify_mod._send_sms_vonage("9876543210", "SOS test message")
             assert mock_open.called
             req = mock_open.call_args[0][0]
             assert "rest.nexmo.com" in req.full_url
             sent_data = json.loads(req.data.decode("utf-8"))
             assert sent_data["api_key"] == "719be850"
-            assert sent_data["to"] == "919901533228"
+            assert sent_data["to"] == "919876543210"
 
         # --- integration: automatic SOS triggers Vonage SMS ---
         client = app.test_client()
@@ -62,8 +62,10 @@ def run():
         client.post(
             "/api/contacts",
             headers=headers,
-            json={"name": "Mom", "phone": "9901533228", "relationship": "Mother"},
+            json={"name": "Emergency Contact", "phone": "9876543210", "relationship": "Mother"},
         )
+
+
         r = client.post(
             "/api/journeys",
             headers=headers,
