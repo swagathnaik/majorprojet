@@ -1381,29 +1381,54 @@ a:hover {
 .gmaps-fabs {
   position: absolute;
   right: 0.85rem;
-  bottom: 7.5rem;
+  bottom: 11.5rem;
   z-index: 600;
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  gap: 0.55rem;
 }
 
 .gmaps-fab {
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  border: none;
-  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #ffffff;
   color: #3c4043;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 700;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.gmaps-fab:hover {
+  transform: scale(1.06);
+  background: #f8fafc;
+}
+
+:root.dark .gmaps-fab,
+body.dark .gmaps-fab,
+.dark .gmaps-fab {
+  background: #27272a;
+  color: #f4f4f5;
+  border-color: #3f3f46;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+
+:root.dark .gmaps-fab:hover,
+body.dark .gmaps-fab:hover,
+.dark .gmaps-fab:hover {
+  background: #3f3f46;
 }
 
 .gmaps-fab.active {
-  color: #ea4335;
-  box-shadow: 0 0 0 2px rgba(234, 67, 53, 0.35), 0 1px 4px rgba(0, 0, 0, 0.25);
+  color: #ea4335 !important;
+  border-color: #ea4335 !important;
+  box-shadow: 0 0 0 2px rgba(234, 67, 53, 0.4), 0 2px 8px rgba(0, 0, 0, 0.25) !important;
 }
 
 .gmaps-panel {
@@ -1682,7 +1707,7 @@ a:hover {
   }
 
   .gmaps-fabs {
-    bottom: calc(46vh + 1.2rem);
+    bottom: calc(46vh + 3.2rem);
     right: 0.65rem;
   }
 

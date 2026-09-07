@@ -1,78 +1,60 @@
 /**
- * Google Maps–style planner map: heatmap, destination pin, scored safer routes.
+ * Google Maps–style planner map using mapcn (MapLibre GL JS).
+ * Renders crime heatmap, destination pin, user location, and scored safer routes.
  */
 import { useEffect, useMemo } from "react";
 import {
-  MapContainer,
-  TileLayer,
-  Marker,
-  Polyline,
-  Popup,
-  ZoomControl,
+  Map,
+  MapControls,
+  MapMarker,
+  MarkerContent,
+  MapRoute,
+  MapHeatLayer,
   useMap,
-} from "react-leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
-import "leaflet.heat";
+} from "./ui/map";
 
-const DEFAULT_CENTER = [12.9716, 77.5946];
-
-function userIcon() {
-  return L.divIcon({
-    className: "sr-user-marker",
-    html: `<div class="sr-user-dot-wrap"><div class="sr-user-pulse"></div><div class="sr-user-dot"></div></div>`,
-    iconSize: [22, 22],
-    iconAnchor: [11, 11],
-  });
-}
-
-function destIcon() {
-  return L.divIcon({
-    className: "sr-dest-marker",
-    html: `<div class="sr-dest-pin"><span></span></div>`,
-    iconSize: [28, 40],
-    iconAnchor: [14, 40],
-  });
-}
-
-function HeatLayer({ heat, enabled }) {
-  const map = useMap();
-  useEffect(() => {
-    if (!enabled || !heat?.length) return undefined;
-    const layer = L.heatLayer(heat, {
-      radius: 28,
-      blur: 22,
-      maxZoom: 17,
-      max: 1.0,
-      minOpacity: 0.35,
-      gradient: {
-        0.2: "#34a853",
-        0.45: "#fbbc04",
-        0.7: "#ea8600",
-        0.9: "#ea4335",
-      },
-    }).addTo(map);
-    return () => {
-      map.removeLayer(layer);
-    };
-  }, [map, heat, enabled]);
-  return null;
-}
+const DEFAULT_CENTER = [77.5946, 12.9716]; // [lng, lat]
 
 function FitBounds({ origin, destination, routes, selectedId }) {
-  const map = useMap();
+  const { map, isLoaded } = useMap();
+
   useEffect(() => {
-    const latlngs = [];
-    if (origin) latlngs.push([origin.lat, origin.lng]);
-    if (destination) latlngs.push([destination.lat, destination.lng]);
+    if (!isLoaded || !map) return;
+
+    const coords = [];
+    if (origin) coords.push([origin.lng, origin.lat]);
+    if (destination) coords.push([destination.lng, destination.lat]);
+
     const selected = routes?.find((r) => r.id === selectedId);
-    (selected?.geometry_latlng || []).forEach((p) => latlngs.push(p));
-    if (latlngs.length >= 2) {
-      map.fitBounds(latlngs, { padding: [80, 80], maxZoom: 15 });
-    } else if (latlngs.length === 1) {
-      map.setView(latlngs[0], 14);
+    if (selected?.geometry_latlng?.length) {
+      selected.geometry_latlng.forEach(([lat, lng]) => coords.push([lng, lat]));
     }
-  }, [map, origin, destination, routes, selectedId]);
+
+    if (coords.length >= 2) {
+      let minLng = coords[0][0],
+        maxLng = coords[0][0],
+        minLat = coords[0][1],
+        maxLat = coords[0][1];
+
+      for (const [lng, lat] of coords) {
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      }
+
+      map.fitBounds(
+        [
+          [minLng, minLat],
+          [maxLng, maxLat],
+        ],
+        { padding: 80, maxZoom: 15, duration: 800 }
+      );
+    } else if (coords.length === 1) {
+      map.flyTo({ center: coords[0], zoom: 14, duration: 800 });
+    }
+  }, [map, isLoaded, origin, destination, routes, selectedId]);
+
   return null;
 }
 
@@ -92,28 +74,27 @@ export default function PlannerMap({
   heat = [],
   showHeat = true,
   onSelectRoute,
+  onMapClick,
 }) {
   const center = useMemo(() => {
-    if (origin) return [origin.lat, origin.lng];
+    if (origin?.lat != null && origin?.lng != null) {
+      return [origin.lng, origin.lat];
+    }
     return DEFAULT_CENTER;
   }, [origin]);
 
   return (
     <div className="planner-map-shell">
-      <MapContainer
-        center={center}
-        zoom={13}
-        className="planner-map"
-        zoomControl={false}
-      >
-        <TileLayer
-          attribution='&copy; OSM &copy; CARTO'
-          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-          subdomains="abcd"
-          maxZoom={20}
+      <Map center={center} zoom={13} className="planner-map" onClick={onMapClick}>
+        <MapControls
+          position="bottom-right"
+          showZoom={true}
+          showCompass={true}
+          showLocate={false}
         />
-        <ZoomControl position="bottomright" />
-        <HeatLayer heat={heat} enabled={showHeat} />
+
+        <MapHeatLayer heat={heat} enabled={showHeat} />
+
         <FitBounds
           origin={origin}
           destination={destination}
@@ -123,38 +104,45 @@ export default function PlannerMap({
 
         {routes.map((route) => {
           const selected = route.id === selectedRouteId;
+          const coords = (route.geometry_latlng || []).map(([lat, lng]) => [
+            lng,
+            lat,
+          ]);
           return (
-            <Polyline
+            <MapRoute
               key={route.id}
-              positions={route.geometry_latlng}
-              pathOptions={{
-                color: routeColor(route, selected),
-                weight: selected ? 7 : 4,
-                opacity: selected ? 0.95 : 0.4,
-                lineCap: "round",
-                lineJoin: "round",
-              }}
-              eventHandlers={{
-                click: () => onSelectRoute?.(route.id),
-              }}
+              id={`route-${route.id}`}
+              coordinates={coords}
+              color={routeColor(route, selected)}
+              width={selected ? 7 : 4}
+              opacity={selected ? 0.95 : 0.4}
+              onClick={() => onSelectRoute?.(route.id)}
             />
           );
         })}
 
         {origin && (
-          <Marker position={[origin.lat, origin.lng]} icon={userIcon()}>
-            <Popup>Your location</Popup>
-          </Marker>
+          <MapMarker longitude={origin.lng} latitude={origin.lat}>
+            <MarkerContent>
+              <div className="sr-user-dot-wrap">
+                <div className="sr-user-pulse"></div>
+                <div className="sr-user-dot"></div>
+              </div>
+            </MarkerContent>
+          </MapMarker>
         )}
+
         {destination && (
-          <Marker
-            position={[destination.lat, destination.lng]}
-            icon={destIcon()}
-          >
-            <Popup>{destination.label || "Destination"}</Popup>
-          </Marker>
+          <MapMarker longitude={destination.lng} latitude={destination.lat}>
+            <MarkerContent>
+              <div className="sr-dest-pin">
+                <span></span>
+              </div>
+            </MarkerContent>
+          </MapMarker>
         )}
-      </MapContainer>
+      </Map>
     </div>
   );
 }
+

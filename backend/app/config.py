@@ -41,25 +41,14 @@ class Config:
     ANOMALY_COOLDOWN_SEC = int(os.getenv("ANOMALY_COOLDOWN_SEC", "180"))
     DEMO_MODE = os.getenv("DEMO_MODE", "true").lower() == "true"
 
-    # Share / notify (Phase 10–12)
+    # Share / notify
     FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
     SIMULATE_POOR_NETWORK = os.getenv("SIMULATE_POOR_NETWORK", "false").lower() == "true"
-    NOTIFY_SMTP_HOST = os.getenv("NOTIFY_SMTP_HOST", "")
-    NOTIFY_SMTP_PORT = int(os.getenv("NOTIFY_SMTP_PORT", "587"))
-    NOTIFY_SMTP_USER = os.getenv("NOTIFY_SMTP_USER", "")
-    NOTIFY_SMTP_PASSWORD = os.getenv("NOTIFY_SMTP_PASSWORD", "")
-    NOTIFY_SMTP_FROM = os.getenv("NOTIFY_SMTP_FROM", "")
-    NOTIFY_EMAIL_TO = os.getenv("NOTIFY_EMAIL_TO", "")
 
     # Vonage SMS to emergency contact phone numbers
     VONAGE_API_KEY = os.getenv("VONAGE_API_KEY", "")
     VONAGE_API_SECRET = os.getenv("VONAGE_API_SECRET", "")
     VONAGE_FROM_NUMBER = os.getenv("VONAGE_FROM_NUMBER", "Vonage APIs")
 
-    # Free instant notification push alternatives (Telegram, Discord, Webhooks)
-
-    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
-    DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
-    NOTIFY_WEBHOOK_URL = os.getenv("NOTIFY_WEBHOOK_URL", "")
-
+    # Mapbox Geocoding & Maps
+    MAPBOX_ACCESS_TOKEN = os.getenv("MAPBOX_ACCESS_TOKEN", "")

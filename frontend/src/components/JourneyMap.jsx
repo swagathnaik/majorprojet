@@ -1,107 +1,77 @@
 /**
- * Live journey map – Leaflet + OpenStreetMap-style tiles (Carto Voyager).
- * Shows planned safer path + live GPS trail.
+ * Live journey map using mapcn (MapLibre GL JS).
+ * Shows planned safer path + live GPS trail with smooth camera following.
  */
 import { useEffect, useMemo } from "react";
 import {
-  MapContainer,
-  TileLayer,
-  Marker,
-  Polyline,
-  Circle,
-  Popup,
-  ZoomControl,
+  Map,
+  MapControls,
+  MapMarker,
+  MarkerContent,
+  MapRoute,
   useMap,
-} from "react-leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+} from "./ui/map";
 
-const DEFAULT_CENTER = [12.9716, 77.5946];
+const DEFAULT_CENTER = [77.5946, 12.9716]; // [lng, lat]
 const DEFAULT_ZOOM = 16;
 
-function userIcon() {
-  return L.divIcon({
-    className: "sr-user-marker",
-    html: `
-      <div class="sr-user-dot-wrap">
-        <div class="sr-user-pulse"></div>
-        <div class="sr-user-dot"></div>
-      </div>
-    `,
-    iconSize: [22, 22],
-    iconAnchor: [11, 11],
-  });
-}
-
-function destIcon() {
-  return L.divIcon({
-    className: "sr-dest-marker",
-    html: `
-      <div class="sr-dest-pin">
-        <span></span>
-      </div>
-    `,
-    iconSize: [28, 40],
-    iconAnchor: [14, 40],
-  });
-}
-
-function startIcon() {
-  return L.divIcon({
-    className: "sr-start-marker",
-    html: `<div class="sr-start-dot"></div>`,
-    iconSize: [14, 14],
-    iconAnchor: [7, 7],
-  });
-}
-
-function MapResizer() {
-  const map = useMap();
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      map.invalidateSize();
-    }, 100);
-    const handleResize = () => map.invalidateSize();
-    window.addEventListener("resize", handleResize);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener("resize", handleResize);
-    };
-  }, [map]);
-  return null;
-}
-
 function FollowUser({ position, followMode }) {
-  const map = useMap();
+  const { map, isLoaded } = useMap();
+
   useEffect(() => {
-    if (followMode && position?.lat != null && position?.lng != null) {
-      map.panTo([position.lat, position.lng], { animate: true });
+    if (isLoaded && map && followMode && position?.lat != null && position?.lng != null) {
+      map.panTo([position.lng, position.lat], { duration: 500 });
     }
-  }, [map, position, followMode]);
+  }, [map, isLoaded, position, followMode]);
+
   return null;
 }
 
 function FitJourney({ points, dest, user, planned }) {
-  const map = useMap();
+  const { map, isLoaded } = useMap();
+
   useEffect(() => {
+    if (!isLoaded || !map) return;
+
     const coords = [];
     (planned || []).forEach((p) => coords.push(p));
-    points.forEach((p) => coords.push([p.lat, p.lng]));
-    if (user?.lat != null) coords.push([user.lat, user.lng]);
-    if (dest?.lat != null) coords.push([dest.lat, dest.lng]);
+    points.forEach((p) => coords.push([p.lng, p.lat]));
+    if (user?.lat != null && user?.lng != null) coords.push([user.lng, user.lat]);
+    if (dest?.lat != null && dest?.lng != null) coords.push([dest.lng, dest.lat]);
+
     if (coords.length >= 2) {
-      map.fitBounds(coords, { padding: [48, 48], maxZoom: 17 });
+      let minLng = coords[0][0],
+        maxLng = coords[0][0],
+        minLat = coords[0][1],
+        maxLat = coords[0][1];
+
+      for (const [lng, lat] of coords) {
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      }
+
+      map.fitBounds(
+        [
+          [minLng, minLat],
+          [maxLng, maxLat],
+        ],
+        { padding: 50, maxZoom: 17, duration: 800 }
+      );
     } else if (coords.length === 1) {
-      map.setView(coords[0], DEFAULT_ZOOM);
+      map.flyTo({ center: coords[0], zoom: DEFAULT_ZOOM, duration: 800 });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map]);
+  }, [map, isLoaded]);
+
   return null;
 }
 
-function plannedLatLng(expectedRoute) {
+function plannedLngLat(expectedRoute) {
   if (!expectedRoute?.coordinates?.length) return [];
-  return expectedRoute.coordinates.map((c) => [c[1], c[0]]);
+  // expectedRoute coordinates in GeoJSON format are [lng, lat]
+  return expectedRoute.coordinates;
 }
 
 export default function JourneyMap({
@@ -114,44 +84,37 @@ export default function JourneyMap({
   expectedRoute = null,
 }) {
   const center = useMemo(() => {
-    if (position?.lat != null) return [position.lat, position.lng];
-    if (path.length) return [path[path.length - 1].lat, path[path.length - 1].lng];
-    if (start?.lat != null) return [start.lat, start.lng];
+    if (position?.lat != null && position?.lng != null) {
+      return [position.lng, position.lat];
+    }
+    if (path.length) {
+      return [path[path.length - 1].lng, path[path.length - 1].lat];
+    }
+    if (start?.lat != null && start?.lng != null) {
+      return [start.lng, start.lat];
+    }
     return DEFAULT_CENTER;
   }, [position, path, start]);
 
   const linePositions = useMemo(
-    () => path.map((p) => [p.lat, p.lng]),
+    () => path.map((p) => [p.lng, p.lat]),
     [path]
   );
 
   const planned = useMemo(
-    () => plannedLatLng(expectedRoute),
+    () => plannedLngLat(expectedRoute),
     [expectedRoute]
   );
 
-  const accuracy =
-    position?.accuracy != null && position.accuracy > 0
-      ? Math.min(position.accuracy, 200)
-      : null;
-
   return (
     <div className={`journey-map-shell status-map-${status}`}>
-      <MapContainer
-        center={center}
-        zoom={DEFAULT_ZOOM}
-        className="journey-map"
-        zoomControl={false}
-        attributionControl={true}
-      >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
-          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-          subdomains="abcd"
-          maxZoom={20}
+      <Map center={center} zoom={DEFAULT_ZOOM} className="journey-map">
+        <MapControls
+          position="bottom-right"
+          showZoom={true}
+          showCompass={true}
+          showLocate={false}
         />
-        <ZoomControl position="bottomright" />
-        <MapResizer />
 
         <FollowUser position={position} followMode={followMode} />
         <FitJourney
@@ -161,68 +124,62 @@ export default function JourneyMap({
           planned={planned}
         />
 
+        {/* Planned safer route */}
         {planned.length >= 2 && (
-          <Polyline
-            positions={planned}
-            pathOptions={{
-              color: "#1a73e8",
-              weight: 6,
-              opacity: 0.55,
-              lineJoin: "round",
-              lineCap: "round",
-              dashArray: "10 8",
-            }}
+          <MapRoute
+            id="journey-planned-route"
+            coordinates={planned}
+            color="#1a73e8"
+            width={6}
+            opacity={0.55}
+            dashArray={[2, 2]}
           />
         )}
 
+        {/* Live traveled path trail */}
         {linePositions.length >= 2 && (
-          <Polyline
-            positions={linePositions}
-            pathOptions={{
-              color: "#34a853",
-              weight: 5,
-              opacity: 0.95,
-              lineJoin: "round",
-              lineCap: "round",
-            }}
+          <MapRoute
+            id="journey-traveled-path"
+            coordinates={linePositions}
+            color="#34a853"
+            width={5}
+            opacity={0.95}
           />
         )}
 
+        {/* Start Point Marker */}
         {start?.lat != null && start?.lng != null && (
-          <Marker position={[start.lat, start.lng]} icon={startIcon()}>
-            <Popup>Start</Popup>
-          </Marker>
+          <MapMarker longitude={start.lng} latitude={start.lat}>
+            <MarkerContent>
+              <div className="sr-start-dot"></div>
+            </MarkerContent>
+          </MapMarker>
         )}
 
+        {/* Destination Marker */}
         {destination?.lat != null && destination?.lng != null && (
-          <Marker
-            position={[destination.lat, destination.lng]}
-            icon={destIcon()}
-          >
-            <Popup>{destination.label || "Destination"}</Popup>
-          </Marker>
+          <MapMarker longitude={destination.lng} latitude={destination.lat}>
+            <MarkerContent>
+              <div className="sr-dest-pin">
+                <span></span>
+              </div>
+            </MarkerContent>
+          </MapMarker>
         )}
 
+        {/* Live User Location Pulse */}
         {position?.lat != null && position?.lng != null && (
-          <>
-            {accuracy != null && (
-              <Circle
-                center={[position.lat, position.lng]}
-                radius={accuracy}
-                pathOptions={{
-                  color: "#1a73e8",
-                  fillColor: "#1a73e8",
-                  fillOpacity: 0.12,
-                  weight: 1,
-                }}
-              />
-            )}
-            <Marker position={[position.lat, position.lng]} icon={userIcon()}>
-              <Popup>You are here</Popup>
-            </Marker>
-          </>
+          <MapMarker longitude={position.lng} latitude={position.lat}>
+            <MarkerContent>
+              <div className="sr-user-dot-wrap">
+                <div className="sr-user-pulse"></div>
+                <div className="sr-user-dot"></div>
+              </div>
+            </MarkerContent>
+          </MapMarker>
         )}
-      </MapContainer>
+      </Map>
     </div>
   );
 }
+

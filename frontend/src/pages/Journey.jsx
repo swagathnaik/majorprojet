@@ -180,6 +180,13 @@ export default function Journey() {
         applyMonitoringPayload(data);
         setError("");
       } catch (err) {
+        const msg = (err?.message || "").toLowerCase();
+        if (msg.includes("active journey") || msg.includes("not found")) {
+          // Journey ended or is no longer active on server
+          setJourney((prev) => (prev ? { ...prev, status: "completed" } : null));
+          refreshActive();
+          return;
+        }
         enqueueOffline({
           kind: "location",
           journeyId: journey.id,
@@ -193,7 +200,7 @@ export default function Journey() {
     sendIfDue();
     const id = setInterval(sendIfDue, intervalMs);
     return () => clearInterval(id);
-  }, [isLive, journey, position, token, intervalSec]);
+  }, [isLive, journey, position, token, intervalSec, refreshActive]);
 
 function sendBrowserNotification(title, options) {
   try {

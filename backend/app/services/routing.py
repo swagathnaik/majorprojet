@@ -11,9 +11,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import os
+from app.config import Config
 from app.services.crime_data import score_route_lnglat
 from app.utils.geo import haversine_m
 
+MAPBOX_GEOCODE_URL = "https://api.mapbox.com/geocoding/v5/mapbox.places"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 OSRM_BASE = "https://router.project-osrm.org/route/v1"
 USER_AGENT = "SafeRouteAcademicDemo/1.0 (student project)"
@@ -204,6 +207,41 @@ def geocode_search(query: str, limit: int = 5) -> list[dict]:
                 seen_labels.add(c["label"])
         return combined[:limit]
 
+    # Attempt 0: Mapbox Places Geocoding (if token configured)
+    api_results = []
+    mapbox_token = getattr(Config, "MAPBOX_ACCESS_TOKEN", None) or os.getenv("MAPBOX_ACCESS_TOKEN") or ""
+    if mapbox_token:
+        try:
+            mb_query = urllib.parse.quote(q)
+            mb_url = f"{MAPBOX_GEOCODE_URL}/{mb_query}.json?access_token={mapbox_token}&country=IN&proximity=77.5946,12.9716&limit={max(1, min(limit, 8))}"
+            mb_data = _http_get_json(mb_url, timeout=6)
+            if isinstance(mb_data, dict) and "features" in mb_data and mb_data["features"]:
+                for feat in mb_data["features"]:
+                    center = feat.get("center")
+                    if center and len(center) >= 2:
+                        place_types = feat.get("place_type", ["place"])
+                        p_type = place_types[0] if place_types else "place"
+                        api_results.append(
+                            {
+                                "label": feat.get("place_name") or feat.get("text"),
+                                "lat": float(center[1]),
+                                "lng": float(center[0]),
+                                "type": p_type,
+                            }
+                        )
+        except Exception:
+            pass
+
+    # If Mapbox produced results, save to cache and return
+    if api_results:
+        GEOCODE_CACHE[cache_key] = api_results
+        combined = list(preset_matches)
+        for c in api_results:
+            if c["label"] not in seen_labels:
+                combined.append(c)
+                seen_labels.add(c["label"])
+        return combined[:limit]
+
     # Attempt 1: Regional search with expanded Bangalore/KA viewbox
     params = urllib.parse.urlencode(
         {
@@ -244,7 +282,6 @@ def geocode_search(query: str, limit: int = 5) -> list[dict]:
         )
         rows = _http_get_json(f"{NOMINATIM_URL}?{params_global}", timeout=8) or []
 
-    api_results = []
     if isinstance(rows, list):
         for row in rows:
             try:
@@ -269,7 +306,85 @@ def geocode_search(query: str, limit: int = 5) -> list[dict]:
             combined.append(c)
             seen_labels.add(c["label"])
 
-    return combined[:limit]
+REVERSE_GEOCODE_CACHE: dict[str, dict] = {}
+
+
+def reverse_geocode(lat: float, lng: float) -> dict:
+    """Reverse geocode coordinates to a human-readable address label."""
+    cache_key = f"{lat:.4f},{lng:.4f}"
+    if cache_key in REVERSE_GEOCODE_CACHE:
+        return REVERSE_GEOCODE_CACHE[cache_key]
+
+    # Check preset landmarks first if within 300 meters
+    for item in PRESET_LOCATIONS:
+        dist = haversine_m(lat, lng, item["lat"], item["lng"])
+        if dist < 300:
+            res = {"label": item["label"], "lat": lat, "lng": lng, "type": item.get("type", "landmark")}
+            REVERSE_GEOCODE_CACHE[cache_key] = res
+            return res
+
+    # 1. Attempt Mapbox Places Reverse Geocoding
+    mapbox_token = getattr(Config, "MAPBOX_ACCESS_TOKEN", None) or os.getenv("MAPBOX_ACCESS_TOKEN") or ""
+    if mapbox_token:
+        try:
+            mb_url = f"{MAPBOX_GEOCODE_URL}/{lng},{lat}.json?access_token={mapbox_token}&limit=1"
+            mb_data = _http_get_json(mb_url, timeout=5)
+            if isinstance(mb_data, dict) and mb_data.get("features"):
+                feat = mb_data["features"][0]
+                label = feat.get("place_name") or feat.get("text")
+                if label:
+                    res = {"label": label, "lat": lat, "lng": lng, "type": "place"}
+                    REVERSE_GEOCODE_CACHE[cache_key] = res
+                    return res
+        except Exception:
+            pass
+
+    # 2. Attempt Nominatim Reverse Geocoding
+    try:
+        nom_url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lng}&format=json&addressdetails=1"
+        nom_data = _http_get_json(nom_url, timeout=5)
+        if isinstance(nom_data, dict) and nom_data.get("display_name"):
+            res = {"label": nom_data["display_name"], "lat": lat, "lng": lng, "type": "place"}
+            REVERSE_GEOCODE_CACHE[cache_key] = res
+            return res
+    except Exception:
+        pass
+
+    res = {"label": f"{lat:.4f}, {lng:.4f}", "lat": lat, "lng": lng, "type": "coordinates"}
+    REVERSE_GEOCODE_CACHE[cache_key] = res
+    return res
+
+
+def get_ip_location(client_ip: str | None = None) -> dict:
+    """Resolve approximate location from IP address for fallback."""
+    try:
+        url = "https://get.geojs.io/v1/ip/geo.json"
+        if client_ip and client_ip not in ("127.0.0.1", "localhost", "::1"):
+            url = f"https://get.geojs.io/v1/ip/geo/{client_ip}.json"
+        data = _http_get_json(url, timeout=5)
+        if isinstance(data, dict) and "latitude" in data and "longitude" in data:
+            lat = float(data["latitude"])
+            lng = float(data["longitude"])
+            city = data.get("city") or "Bengaluru"
+            region = data.get("region") or "Karnataka"
+            return {
+                "lat": lat,
+                "lng": lng,
+                "label": f"{city}, {region}",
+                "city": city,
+                "source": "ip",
+            }
+    except Exception:
+        pass
+
+    # Default fallback to campus landmark (Acharya Institutes)
+    return {
+        "lat": 13.0837,
+        "lng": 77.4857,
+        "label": "Acharya Institutes, Soladevanahalli, Bengaluru",
+        "city": "Bengaluru",
+        "source": "preset_fallback",
+    }
 
 
 def fetch_safer_routes(

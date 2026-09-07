@@ -27,12 +27,38 @@ def crime_hotspots():
 
 
 @maps_bp.get("/geocode")
-@jwt_required()
+@jwt_required(optional=True)
 def geocode():
-    """Place search (Nominatim via backend)."""
+    """Place search (Nominatim / Mapbox via backend)."""
     q = request.args.get("q", "")
     results = geocode_search(q, limit=int(request.args.get("limit", 5)))
     return jsonify({"results": results}), 200
+
+
+@maps_bp.get("/reverse-geocode")
+@jwt_required(optional=True)
+def reverse_geocode_route():
+    """Convert lat,lng to human-readable address label."""
+    from app.services.routing import reverse_geocode as rev_geo
+    try:
+        lat = float(request.args.get("lat"))
+        lng = float(request.args.get("lng"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Valid lat and lng query params are required"}), 400
+    res = rev_geo(lat, lng)
+    return jsonify(res), 200
+
+
+@maps_bp.get("/ip-location")
+@jwt_required(optional=True)
+def ip_location_route():
+    """Get approximate location based on client IP or network fallback."""
+    from app.services.routing import get_ip_location as ip_loc
+    client_ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+    if client_ip and "," in client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+    res = ip_loc(client_ip)
+    return jsonify(res), 200
 
 
 @maps_bp.post("/safer-routes")

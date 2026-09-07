@@ -46,7 +46,17 @@ export async function flushOfflineQueue({ token, postLocation, postSos }) {
       } else {
         remaining.push(item);
       }
-    } catch {
+    } catch (err) {
+      const msg = (err?.message || "").toLowerCase();
+      if (
+        msg.includes("active journey") ||
+        msg.includes("not found") ||
+        msg.includes("completed") ||
+        msg.includes("ended")
+      ) {
+        // Journey is no longer active on server, safely discard queued update
+        continue;
+      }
       remaining.push(item);
     }
   }

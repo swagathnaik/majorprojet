@@ -35,19 +35,32 @@ export default function SafeRoutePlanner({
 
   const displayError = startError || error;
 
-  const { position, error: geoError, requestOnce, permissionState } =
+  const { position, error: geoError, requestOnce, permissionState, isLocating } =
     useGeolocation({ enabled: true });
 
+  // Initial automatic location detection
   useEffect(() => {
     if (position && !origin) {
-      setOrigin({
+      const initial = {
         lat: position.lat,
         lng: position.lng,
-        label: "Current location",
-      });
-    }
-  }, [position, origin]);
+        label: position.label || "Current location",
+      };
+      setOrigin(initial);
 
+      // Asynchronously resolve address label for accurate visual feedback
+      mapsApi
+        .reverseGeocode(token, position.lat, position.lng)
+        .then((res) => {
+          if (res?.label) {
+            setOrigin((prev) => (prev ? { ...prev, label: res.label } : prev));
+          }
+        })
+        .catch(() => {});
+    }
+  }, [position, origin, token]);
+
+  // Load contacts and crime heatmap on boot
   useEffect(() => {
     async function boot() {
       try {
@@ -70,13 +83,34 @@ export default function SafeRoutePlanner({
 
   const locateMe = useCallback(async () => {
     try {
+      setStatus("Updating GPS location…");
+      setError("");
       const pos = await requestOnce();
-      setOrigin({ lat: pos.lat, lng: pos.lng, label: "Current location" });
+      const updated = {
+        lat: pos.lat,
+        lng: pos.lng,
+        label: pos.label || "Current location",
+      };
+      setOrigin(updated);
       setStatus("Location updated.");
+
+      try {
+        const rev = await mapsApi.reverseGeocode(token, pos.lat, pos.lng);
+        if (rev?.label) {
+          updated.label = rev.label;
+          setOrigin({ ...updated });
+        }
+      } catch {
+        /* ignore */
+      }
+
+      if (destination) {
+        await computeRoutes(destination.lat, destination.lng, destination.label, updated);
+      }
     } catch (err) {
-      setError(err.message || "Could not get GPS.");
+      setError(err.message || "Could not get GPS location.");
     }
-  }, [requestOnce]);
+  }, [requestOnce, token, destination]);
 
   function onSearchChange(e) {
     const value = e.target.value;
@@ -105,18 +139,18 @@ export default function SafeRoutePlanner({
     setSuggestions([]);
     setDestination({ lat: item.lat, lng: item.lng, label: item.label });
     setPanelOpen(true);
-    await computeRoutes(item.lat, item.lng, item.label);
+    await computeRoutes(item.lat, item.lng, item.label, origin);
   }
 
-  async function computeRoutes(destLat, destLng, destLabel) {
+  async function computeRoutes(destLat, destLng, destLabel, customOrigin = null) {
     setRouting(true);
     setError("");
     setStatus("Finding safest routes…");
     try {
-      let start = origin;
+      let start = customOrigin || origin;
       if (!start) {
         const pos = await requestOnce();
-        start = { lat: pos.lat, lng: pos.lng, label: "Current location" };
+        start = { lat: pos.lat, lng: pos.lng, label: pos.label || "Current location" };
         setOrigin(start);
       }
       const data = await mapsApi.saferRoutes(token, {
@@ -146,6 +180,29 @@ export default function SafeRoutePlanner({
       setRouting(false);
     }
   }
+
+  // Allow clicking on map to choose destination
+  const handleMapClick = useCallback(
+    async ({ lngLat }) => {
+      if (!lngLat) return;
+      const { lng, lat } = lngLat;
+      setStatus("Selected map location…");
+
+      let label = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+      try {
+        const rev = await mapsApi.reverseGeocode(token, lat, lng);
+        if (rev?.label) label = rev.label;
+      } catch {
+        /* ignore */
+      }
+
+      setDestination({ lat, lng, label });
+      setQuery(label);
+      setPanelOpen(true);
+      computeRoutes(lat, lng, label, origin);
+    },
+    [origin, token]
+  );
 
   async function handleStart() {
     if (!destination) {
@@ -205,9 +262,10 @@ export default function SafeRoutePlanner({
           heat={heat}
           showHeat={showHeat}
           onSelectRoute={setSelectedRouteId}
+          onMapClick={handleMapClick}
         />
 
-        {/* Google Maps–style floating search */}
+        {/* Clean Google Maps–style floating search */}
         <div className="gmaps-topbar">
           <div className="gmaps-search-box">
             <span className="gmaps-search-icon" aria-hidden>
@@ -279,9 +337,10 @@ export default function SafeRoutePlanner({
             type="button"
             className="gmaps-fab"
             onClick={locateMe}
+            disabled={isLocating}
             title="My location"
           >
-            ◎
+            {isLocating ? "…" : "◎"}
           </button>
           <button
             type="button"
@@ -311,14 +370,22 @@ export default function SafeRoutePlanner({
                       {origin
                         ? origin.label ||
                           `${origin.lat.toFixed(4)}, ${origin.lng.toFixed(4)}`
-                        : "Getting GPS…"}
+                        : "Detecting location…"}
                     </strong>
                   </div>
-                  <button type="button" className="link-btn" onClick={locateMe}>
-                    GPS
+                  <button
+                    type="button"
+                    className="link-btn"
+                    onClick={locateMe}
+                    disabled={isLocating}
+                    title="Refresh GPS location"
+                  >
+                    {isLocating ? "Locating…" : "GPS"}
                   </button>
                 </div>
+
                 <div className="gmaps-leg-line" />
+
                 <div className="gmaps-leg">
                   <span className="leg-dot dest" />
                   <div className="leg-text">
@@ -328,6 +395,15 @@ export default function SafeRoutePlanner({
                         (query ? query : "Search a place above")}
                     </strong>
                   </div>
+                  {destination && (
+                    <button
+                      type="button"
+                      className="link-btn text-danger"
+                      onClick={clearDestination}
+                    >
+                      Clear
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -362,7 +438,9 @@ export default function SafeRoutePlanner({
                   />
                   Crime heatmap
                 </label>
-                <span className="muted tiny">GPS: {permissionState}</span>
+                <span className="muted tiny">
+                  GPS: {permissionState === "approximate" ? "Network" : permissionState}
+                </span>
               </div>
               {crimeMeta?.source && (
                 <p className="muted tiny heat-source">
@@ -380,7 +458,7 @@ export default function SafeRoutePlanner({
                 <div className="muted tiny">Computing safest paths…</div>
               )}
 
-                {routes.length > 0 && (
+              {routes.length > 0 && (
                 <div className="route-cards">
                   <div className="route-cards-title">
                     {routes.length} route{routes.length === 1 ? "" : "s"} · pick safest

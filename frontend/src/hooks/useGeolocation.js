@@ -1,75 +1,169 @@
 /**
- * Browser Geolocation hook for SafeRoute.
+ * Browser Geolocation hook for SafeRoute with robust multi-layer fallback.
  *
- * Limitations (document for viva):
- * - Requires HTTPS or localhost
- * - Tracking is unreliable when the browser tab is backgrounded/closed
- * - A native app (Flutter) would be better for background GPS later
+ * Layer 1: High-accuracy GPS (smartphones, GPS hardware)
+ * Layer 2: Standard-accuracy Wi-Fi/Cell positioning (laptops, PCs, desktops)
+ * Layer 3: Network IP-based geolocation (/api/maps/ip-location or geojs)
+ * Layer 4: Landmark fallback (Soladevanahalli / Bengaluru campus)
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const defaultOptions = {
-  enableHighAccuracy: true,
-  maximumAge: 5000,
-  timeout: 15000,
+const FALLBACK_DEFAULT = {
+  lat: 13.0837,
+  lng: 77.4857,
+  accuracy: 1000,
+  speed: null,
+  heading: null,
+  label: "Acharya Institutes, Soladevanahalli, Bengaluru",
+  source: "default_fallback",
+  recorded_at: new Date().toISOString(),
 };
 
-export function useGeolocation({ enabled = false, options = defaultOptions } = {}) {
+export function useGeolocation({ enabled = false } = {}) {
   const [position, setPosition] = useState(null);
   const [error, setError] = useState(null);
-  const [permissionState, setPermissionState] = useState("prompt"); // prompt|granted|denied|unsupported
+  const [permissionState, setPermissionState] = useState("prompt"); // prompt|granted|denied|unsupported|approximate
+  const [isLocating, setIsLocating] = useState(false);
   const watchIdRef = useRef(null);
 
   const clearWatch = useCallback(() => {
-    if (watchIdRef.current != null && navigator.geolocation) {
+    if (watchIdRef.current != null && typeof navigator !== "undefined" && navigator.geolocation) {
       navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
     }
   }, []);
 
-  const requestOnce = useCallback(() => {
-    return new Promise((resolve, reject) => {
-      if (!navigator.geolocation) {
-        const err = new Error("Geolocation is not supported by this browser.");
-        setPermissionState("unsupported");
-        setError(err.message);
-        reject(err);
-        return;
+  const fetchIpFallback = useCallback(async () => {
+    try {
+      const res = await fetch("/api/maps/ip-location");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.lat && data.lng) {
+          const approx = {
+            lat: data.lat,
+            lng: data.lng,
+            accuracy: 5000,
+            speed: null,
+            heading: null,
+            label: data.label || "Current Area",
+            source: data.source || "ip",
+            recorded_at: new Date().toISOString(),
+          };
+          setPosition(approx);
+          setPermissionState("approximate");
+          return approx;
+        }
       }
+    } catch {
+      // ignore
+    }
 
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const next = mapPosition(pos);
-          setPosition(next);
-          setError(null);
-          setPermissionState("granted");
-          resolve(next);
-        },
-        (geoError) => {
-          const message = geoErrorMessage(geoError);
-          setError(message);
-          if (geoError.code === geoError.PERMISSION_DENIED) {
-            setPermissionState("denied");
-          }
-          reject(new Error(message));
-        },
-        { ...defaultOptions, ...options }
-      );
-    });
-  }, [options]);
+    try {
+      const res = await fetch("https://get.geojs.io/v1/ip/geo.json");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.latitude && data.longitude) {
+          const approx = {
+            lat: parseFloat(data.latitude),
+            lng: parseFloat(data.longitude),
+            accuracy: 5000,
+            speed: null,
+            heading: null,
+            label: `${data.city || "Bengaluru"}, ${data.region || "Karnataka"}`,
+            source: "ip",
+            recorded_at: new Date().toISOString(),
+          };
+          setPosition(approx);
+          setPermissionState("approximate");
+          return approx;
+        }
+      }
+    } catch {
+      // ignore
+    }
 
+    setPosition(FALLBACK_DEFAULT);
+    setPermissionState("approximate");
+    return FALLBACK_DEFAULT;
+  }, []);
+
+  const requestOnce = useCallback(async () => {
+    setIsLocating(true);
+    setError(null);
+
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setPermissionState("unsupported");
+      const fallback = await fetchIpFallback();
+      setIsLocating(false);
+      return fallback;
+    }
+
+    // Step 1: Try high accuracy (with quick 5s timeout)
+    const tryHigh = () =>
+      new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve(mapPosition(pos)),
+          (err) => reject(err),
+          { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+        );
+      });
+
+    // Step 2: Try low accuracy (Wi-Fi / ISP / network triangulation)
+    const tryLow = () =>
+      new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve(mapPosition(pos)),
+          (err) => reject(err),
+          { enableHighAccuracy: false, timeout: 8000, maximumAge: 30000 }
+        );
+      });
+
+    try {
+      const pos = await tryHigh();
+      setPosition(pos);
+      setError(null);
+      setPermissionState("granted");
+      setIsLocating(false);
+      return pos;
+    } catch {
+      // High accuracy timed out or unavailable, try low accuracy
+      try {
+        const pos = await tryLow();
+        setPosition(pos);
+        setError(null);
+        setPermissionState("granted");
+        setIsLocating(false);
+        return pos;
+      } catch (lowErr) {
+        // Step 3: Browser geolocation failed completely (e.g. desktop with no WiFi or permission denied)
+        const msg = geoErrorMessage(lowErr);
+        if (lowErr.code === lowErr.PERMISSION_DENIED) {
+          setPermissionState("denied");
+        }
+        const fallback = await fetchIpFallback();
+        setError(`${msg} Using approximate area.`);
+        setIsLocating(false);
+        return fallback;
+      }
+    }
+  }, [fetchIpFallback]);
+
+  // Handle active watching when enabled
   useEffect(() => {
     if (!enabled) {
       clearWatch();
-      return;
+      return undefined;
     }
 
-    if (!navigator.geolocation) {
-      setPermissionState("unsupported");
-      setError("Geolocation is not supported by this browser.");
-      return;
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      fetchIpFallback();
+      return undefined;
     }
 
+    // Initial position fetch
+    requestOnce().catch(() => {});
+
+    // Start watchPosition with standard options (resilient to desktop GPS absence)
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         setPosition(mapPosition(pos));
@@ -77,24 +171,42 @@ export function useGeolocation({ enabled = false, options = defaultOptions } = {
         setPermissionState("granted");
       },
       (geoError) => {
-        setError(geoErrorMessage(geoError));
+        // If watchPosition encounters error, don't wipe existing position
         if (geoError.code === geoError.PERMISSION_DENIED) {
           setPermissionState("denied");
+          setError(geoErrorMessage(geoError));
         }
       },
-      { ...defaultOptions, ...options }
+      { enableHighAccuracy: false, timeout: 12000, maximumAge: 10000 }
     );
 
     return clearWatch;
-  }, [enabled, options, clearWatch]);
+  }, [enabled, clearWatch, requestOnce, fetchIpFallback]);
+
+  const setManualPosition = useCallback((coords) => {
+    if (!coords || coords.lat == null || coords.lng == null) return;
+    setPosition({
+      lat: coords.lat,
+      lng: coords.lng,
+      accuracy: 10,
+      speed: null,
+      heading: null,
+      label: coords.label || "Selected location",
+      source: "manual",
+      recorded_at: new Date().toISOString(),
+    });
+    setError(null);
+  }, []);
 
   return {
     position,
     error,
     permissionState,
+    isLocating,
     supported: typeof navigator !== "undefined" && Boolean(navigator.geolocation),
     requestOnce,
     clearWatch,
+    setManualPosition,
   };
 }
 
@@ -104,9 +216,9 @@ function mapPosition(pos) {
     lat: latitude,
     lng: longitude,
     accuracy: accuracy ?? null,
-    // Browser speed is m/s; may be null when stationary
     speed: speed != null && !Number.isNaN(speed) ? speed : null,
     heading: heading != null && !Number.isNaN(heading) ? heading : null,
+    source: "gps",
     recorded_at: new Date(pos.timestamp).toISOString(),
   };
 }
@@ -114,12 +226,12 @@ function mapPosition(pos) {
 function geoErrorMessage(err) {
   switch (err.code) {
     case err.PERMISSION_DENIED:
-      return "Location permission denied. Allow location access for SafeRoute.";
+      return "Location permission denied.";
     case err.POSITION_UNAVAILABLE:
-      return "Location unavailable. Check GPS / network settings.";
+      return "GPS / Wi-Fi position unavailable.";
     case err.TIMEOUT:
-      return "Location request timed out. Try again.";
+      return "Location request timed out.";
     default:
-      return err.message || "Unable to get location.";
+      return err.message || "Unable to get GPS.";
   }
 }

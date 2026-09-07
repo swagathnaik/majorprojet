@@ -1,21 +1,18 @@
 """
 Trusted-contact notifications (Phase 10–12).
 
-Demo mode: records notification events (no real SMS gateway required).
-Optional SMTP if NOTIFY_SMTP_* env vars are set.
-Optional Vonage SMS if VONAGE_* env vars are set.
+Vonage SMS gateway for SOS alerts.
+Direct WhatsApp and SMS 1-click fallback links.
+In-app notification logging.
 """
 from __future__ import annotations
 
 import json
 import re
-import smtplib
-import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
-from email.message import EmailMessage
 from pathlib import Path
 
 from flask import current_app, request
@@ -215,14 +212,10 @@ def _sms_text(payload: dict) -> str:
 
 def _deliver(payload: dict, contact: EmergencyContact | None) -> dict:
     """
-    Attempt multi-gateway delivery:
-      SMS: Vonage SMS
-      Push/Bot: Telegram -> Discord -> Custom Webhook
-      Email: SMTP
+    Attempt Vonage SMS delivery.
     Always attaches direct WhatsApp/SMS action URLs for 1-click fallback.
     """
     channels = ["in_app_log"]
-    smtp_ok = False
     sms_ok = False
     sms_provider = None
 
@@ -246,45 +239,6 @@ def _deliver(payload: dict, contact: EmergencyContact | None) -> dict:
         else:
             channels.append("sms_stub")
 
-
-
-    # Free instant notification alternatives: Telegram Bot & Discord Webhook
-    tg_token = current_app.config.get("TELEGRAM_BOT_TOKEN")
-    tg_chat = current_app.config.get("TELEGRAM_CHAT_ID")
-    if tg_token and tg_chat:
-        try:
-            _send_telegram(tg_token, tg_chat, payload.get("message", ""))
-            channels.append("telegram")
-        except Exception as err:  # noqa: BLE001
-            channels.append(f"telegram_failed:{err}")
-
-    discord_url = current_app.config.get("DISCORD_WEBHOOK_URL")
-    if discord_url:
-        try:
-            _send_discord(discord_url, payload.get("message", ""))
-            channels.append("discord")
-        except Exception as err:  # noqa: BLE001
-            channels.append(f"discord_failed:{err}")
-
-    contact_email = getattr(contact, "email", None) if contact else None
-    smtp_to = contact_email or current_app.config.get("NOTIFY_EMAIL_TO") or ""
-    if current_app.config.get("NOTIFY_SMTP_HOST") and smtp_to:
-        try:
-            subject = "🚨 EMERGENCY SOS ALERT - SafeRoute" if payload.get("event") == "sos_alert" else f"SafeRoute: {payload.get('traveler')} shared a journey"
-            _send_smtp(smtp_to, subject, payload["message"], html_body=_build_html_email(payload))
-            channels.append("email")
-            smtp_ok = True
-        except Exception as err:  # noqa: BLE001 – demo resilient
-            channels.append(f"email_failed:{err}")
-
-    webhook_url = current_app.config.get("NOTIFY_WEBHOOK_URL")
-    if webhook_url:
-        try:
-            _send_webhook(webhook_url, payload)
-            channels.append("webhook")
-        except Exception as err:  # noqa: BLE001
-            channels.append(f"webhook_failed:{err}")
-
     network = "online"
     if current_app.config.get("SIMULATE_POOR_NETWORK"):
         network = "degraded"
@@ -294,132 +248,9 @@ def _deliver(payload: dict, contact: EmergencyContact | None) -> dict:
         "channels": channels,
         "sms_sent": sms_ok,
         "sms_provider": sms_provider,
-        "smtp_sent": smtp_ok,
         "network": network,
-        "demo": not sms_ok and not smtp_ok,
+        "demo": not sms_ok,
     }
-
-
-def _send_telegram(token: str, chat_id: str, message: str) -> None:
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    data = urllib.parse.urlencode({"chat_id": chat_id, "text": message}).encode("utf-8")
-    req = urllib.request.Request(url, data=data, method="POST")
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        if resp.status >= 400:
-            raise RuntimeError(f"Telegram HTTP {resp.status}")
-
-
-def _send_discord(url: str, message: str) -> None:
-    data = json.dumps({"content": message}, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(url, data=data, method="POST")
-    req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        if resp.status >= 400:
-            raise RuntimeError(f"Discord HTTP {resp.status}")
-
-
-def _ssl_context() -> ssl.SSLContext | None:
-    try:
-        import certifi
-        return ssl.create_default_context(cafile=certifi.where())
-    except Exception:
-        pass
-    try:
-        return ssl.create_default_context()
-    except Exception:
-        return ssl._create_unverified_context()
-
-
-def _send_webhook(url: str, payload: dict) -> None:
-    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(url, data=data, method="POST")
-    req.add_header("Content-Type", "application/json")
-    req.add_header("User-Agent", "SafeRoute-SOS-Notifier/1.0")
-
-    ctx = _ssl_context()
-    try:
-        with urllib.request.urlopen(req, timeout=12, context=ctx) as resp:
-            if resp.status >= 400:
-                raise RuntimeError(f"Webhook HTTP {resp.status}")
-    except urllib.error.URLError as err:
-        if "CERTIFICATE_VERIFY_FAILED" in str(err):
-            unverified_ctx = ssl._create_unverified_context()
-            with urllib.request.urlopen(req, timeout=12, context=unverified_ctx) as resp:
-                if resp.status >= 400:
-                    raise RuntimeError(f"Webhook HTTP {resp.status}")
-        else:
-            raise
-
-
-
-
-def _build_html_email(payload: dict) -> str:
-    """Generate HTML email body for emergency alerts and journey notifications."""
-    traveler = payload.get("traveler") or "Traveler"
-    share_url = payload.get("share_url") or "#"
-    event = payload.get("event")
-
-    if event == "sos_alert":
-        reason = payload.get("reason") or "Emergency alert triggered"
-        loc = f"{payload['lat']:.5f}, {payload['lng']:.5f}" if payload.get("lat") is not None and payload.get("lng") is not None else "Location updating..."
-        return f"""
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 2px solid #e53e3e; border-radius: 8px; background-color: #fff5f5;">
-            <h2 style="color: #c53030; margin-top: 0;">🚨 EMERGENCY SOS ALERT</h2>
-            <p style="font-size: 16px; color: #2d3748;">
-                <strong>{traveler}</strong> has triggered an emergency SOS alert on SafeRoute!
-            </p>
-            <div style="background-color: #ffffff; padding: 15px; border-radius: 6px; border: 1px solid #feb2b2; margin: 15px 0;">
-                <p style="margin: 5px 0;"><strong>Reason:</strong> {reason}</p>
-                <p style="margin: 5px 0;"><strong>Current Coordinates:</strong> {loc}</p>
-                <p style="margin: 5px 0;"><strong>Time:</strong> {payload.get('at', '')}</p>
-            </div>
-            <div style="text-align: center; margin: 25px 0;">
-                <a href="{share_url}" style="background-color: #e53e3e; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; display: inline-block;">
-                    📍 TRACK LIVE LOCATION NOW
-                </a>
-            </div>
-            <p style="font-size: 12px; color: #718096; text-align: center;">
-                SafeRoute Personal Journey Safety System
-            </p>
-        </div>
-        """
-    
-    dest = payload.get("destination") or "their destination"
-    return f"""
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px; background-color: #f7fafc;">
-        <h2 style="color: #2b6cb0; margin-top: 0;">🗺️ Safe Journey Started</h2>
-        <p style="font-size: 16px; color: #2d3748;">
-            <strong>{traveler}</strong> has started a Safe Journey to <strong>{dest}</strong>.
-        </p>
-        <div style="text-align: center; margin: 25px 0;">
-            <a href="{share_url}" style="background-color: #3182ce; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
-                View Live Journey Map
-            </a>
-        </div>
-    </div>
-    """
-
-
-def _send_smtp(to_addr: str, subject: str, body: str, html_body: str | None = None) -> None:
-    host = current_app.config["NOTIFY_SMTP_HOST"]
-    port = int(current_app.config.get("NOTIFY_SMTP_PORT", 587))
-    user = current_app.config.get("NOTIFY_SMTP_USER") or ""
-    password = current_app.config.get("NOTIFY_SMTP_PASSWORD") or ""
-    from_addr = current_app.config.get("NOTIFY_SMTP_FROM") or user or "saferoute@localhost"
-
-    msg = EmailMessage()
-    msg["Subject"] = subject if subject.startswith("[SafeRoute]") else f"[SafeRoute] {subject}"
-    msg["From"] = from_addr
-    msg["To"] = to_addr
-    msg.set_content(body)
-    if html_body:
-        msg.add_alternative(html_body, subtype="html")
-
-    with smtplib.SMTP(host, port, timeout=12) as smtp:
-        smtp.starttls()
-        if user and password:
-            smtp.login(user, password)
-        smtp.send_message(msg)
 
 
 

@@ -134,6 +134,10 @@ export const mapsApi = {
   crimeHotspots: (token) => apiRequest("/maps/crime-hotspots", { token }),
   geocode: (token, q) =>
     apiRequest(`/maps/geocode?q=${encodeURIComponent(q)}`, { token }),
+  reverseGeocode: (token, lat, lng) =>
+    apiRequest(`/maps/reverse-geocode?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`, { token }),
+  ipLocation: (token) =>
+    apiRequest("/maps/ip-location", { token }),
   saferRoutes: (token, payload) =>
     apiRequest("/maps/safer-routes", { method: "POST", body: payload, token }),
 };
