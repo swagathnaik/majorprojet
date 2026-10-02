@@ -31,6 +31,7 @@ export default function Contacts() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [testingWaId, setTestingWaId] = useState(null);
 
   const loadContacts = useCallback(async () => {
     setError("");
@@ -43,6 +44,20 @@ export default function Contacts() {
       setLoading(false);
     }
   }, [token]);
+
+  async function onTestWhatsapp(id, name) {
+    setError("");
+    setMessage("");
+    setTestingWaId(id);
+    try {
+      const data = await contactsApi.testWhatsapp(token, id);
+      setMessage(data.message || `Test WhatsApp message sent to ${name}!`);
+    } catch (err) {
+      setError(err.message || `Could not send test WhatsApp message to ${name}.`);
+    } finally {
+      setTestingWaId(null);
+    }
+  }
 
   useEffect(() => {
     loadContacts();
@@ -226,6 +241,15 @@ export default function Contacts() {
                     </p>
                   </div>
                   <div className="contact-actions">
+                    <button
+                      type="button"
+                      className="link-btn"
+                      disabled={testingWaId === c.id}
+                      onClick={() => onTestWhatsapp(c.id, c.name)}
+                      title="Send a real test WhatsApp message via Meta Cloud API"
+                    >
+                      {testingWaId === c.id ? "Sending…" : "📲 Test WhatsApp"}
+                    </button>
                     {!c.is_primary && (
                       <button
                         type="button"

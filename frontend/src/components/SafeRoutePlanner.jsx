@@ -56,7 +56,7 @@ export default function SafeRoutePlanner({
             setOrigin((prev) => (prev ? { ...prev, label: res.label } : prev));
           }
         })
-        .catch(() => {});
+        .catch(() => { });
     }
   }, [position, origin, token]);
 
@@ -230,11 +230,11 @@ export default function SafeRoutePlanner({
       active_contact_id: Number(contactId),
       expected_route: selected
         ? {
-            safety_score: selected.safety_score,
-            risk_indicator: selected.risk_indicator,
-            coordinates: selected.coordinates,
-            distance_m: selected.distance_m,
-          }
+          safety_score: selected.safety_score,
+          risk_indicator: selected.risk_indicator,
+          coordinates: selected.coordinates,
+          distance_m: selected.distance_m,
+        }
         : null,
     });
   }
@@ -247,6 +247,30 @@ export default function SafeRoutePlanner({
     setSuggestions([]);
     setStatus("");
     searchInputRef.current?.focus();
+  }
+
+  async function handleKeyDown(e) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (suggestions.length > 0) {
+        selectSuggestion(suggestions[0]);
+      } else if (query.trim().length >= 2) {
+        setSearching(true);
+        try {
+          const data = await mapsApi.geocode(token, query.trim());
+          const list = data.results || [];
+          if (list.length > 0) {
+            selectSuggestion(list[0]);
+          } else {
+            setError(`No places found for "${query}". Try typing a landmark or area.`);
+          }
+        } catch (err) {
+          setError(err.message || "Search failed.");
+        } finally {
+          setSearching(false);
+        }
+      }
+    }
   }
 
   const selectedRoute = routes.find((r) => r.id === selectedRouteId);
@@ -275,6 +299,7 @@ export default function SafeRoutePlanner({
               ref={searchInputRef}
               value={query}
               onChange={onSearchChange}
+              onKeyDown={handleKeyDown}
               placeholder="Search destination"
               aria-label="Search destination"
               autoComplete="off"
@@ -369,7 +394,7 @@ export default function SafeRoutePlanner({
                     <strong>
                       {origin
                         ? origin.label ||
-                          `${origin.lat.toFixed(4)}, ${origin.lng.toFixed(4)}`
+                        `${origin.lat.toFixed(4)}, ${origin.lng.toFixed(4)}`
                         : "Detecting location…"}
                     </strong>
                   </div>

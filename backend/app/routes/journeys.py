@@ -342,9 +342,9 @@ def post_location(journey_id: int):
     journey = _owned_journey(journey_id, user_id)
     if not journey:
         return jsonify({"error": "Journey not found."}), 404
-    if journey.status != "active":
+    if journey.status not in ("active", "sos"):
         return (
-            jsonify({"error": "Locations can only be recorded for an active journey."}),
+            jsonify({"error": "Locations can only be recorded for an active or SOS journey."}),
             400,
         )
 
@@ -399,6 +399,12 @@ def get_monitoring(journey_id: int):
     if not journey:
         return jsonify({"error": "Journey not found."}), 404
     result = evaluate_anomalies(journey)
+    from app.models.sos import SosAlert
+    active_sos = (
+        SosAlert.query.filter_by(journey_id=journey.id, status="active")
+        .order_by(SosAlert.created_at.desc())
+        .first()
+    )
     return (
         jsonify(
             {
@@ -406,6 +412,8 @@ def get_monitoring(journey_id: int):
                 "open_anomalies": result["open_anomalies"],
                 "newly_created_anomalies": result["newly_created"],
                 "active_safety_check": result["active_safety_check"],
+                "journey": _journey_payload(journey),
+                "sos": active_sos.to_dict() if active_sos else None,
             }
         ),
         200,
@@ -451,6 +459,17 @@ def demo_simulate_anomaly(journey_id: int):
         return jsonify({"error": str(exc)}), 403
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
+
+    result["journey"] = _journey_payload(journey)
+    if journey.status == "sos":
+        from app.models.sos import SosAlert
+        active_sos = (
+            SosAlert.query.filter_by(journey_id=journey.id, status="active")
+            .order_by(SosAlert.created_at.desc())
+            .first()
+        )
+        if active_sos:
+            result["sos"] = active_sos.to_dict()
 
     return jsonify(result), 201
 

@@ -25,8 +25,10 @@ function FitBounds({ origin, destination, routes, selectedId }) {
     if (origin) coords.push([origin.lng, origin.lat]);
     if (destination) coords.push([destination.lng, destination.lat]);
 
-    const selected = routes?.find((r) => r.id === selectedId);
-    if (selected?.geometry_latlng?.length) {
+    const selected = routes?.find((r) => r.id === selectedId) || routes?.[0];
+    if (selected?.coordinates?.length) {
+      selected.coordinates.forEach((pt) => coords.push(pt));
+    } else if (selected?.geometry_latlng?.length) {
       selected.geometry_latlng.forEach(([lat, lng]) => coords.push([lng, lat]));
     }
 
@@ -59,11 +61,10 @@ function FitBounds({ origin, destination, routes, selectedId }) {
 }
 
 function routeColor(route, selected) {
-  if (!selected) return "#9aa0a6";
-  if (route.is_recommended) return "#1a73e8";
-  if (route.safety_score >= 75) return "#34a853";
-  if (route.safety_score >= 50) return "#fbbc04";
-  return "#ea4335";
+  if (selected) {
+    return "#2563eb"; // Google Maps vibrant navigation blue
+  }
+  return "rgba(96, 165, 250, 0.45)"; // Softer blue for alternative routes
 }
 
 export default function PlannerMap({
@@ -82,6 +83,28 @@ export default function PlannerMap({
     }
     return DEFAULT_CENTER;
   }, [origin]);
+
+  const effectiveSelectedId =
+    selectedRouteId != null
+      ? selectedRouteId
+      : routes.find((r) => r.is_recommended)?.id ?? routes[0]?.id;
+
+  const sortedRoutes = useMemo(() => {
+    if (!routes || !routes.length) return [];
+    return [...routes].sort((a, b) => {
+      const aSel = String(a.id) === String(effectiveSelectedId) ? 1 : 0;
+      const bSel = String(b.id) === String(effectiveSelectedId) ? 1 : 0;
+      return aSel - bSel;
+    });
+  }, [routes, effectiveSelectedId]);
+
+  const selectedRoute = useMemo(() => {
+    return (
+      routes.find((r) => String(r.id) === String(effectiveSelectedId)) ||
+      routes[0] ||
+      null
+    );
+  }, [routes, effectiveSelectedId]);
 
   return (
     <div className="planner-map-shell">
@@ -102,27 +125,51 @@ export default function PlannerMap({
           selectedId={selectedRouteId}
         />
 
-        {routes.map((route) => {
-          const selected = route.id === selectedRouteId;
-          const coords = (route.geometry_latlng || []).map(([lat, lng]) => [
-            lng,
-            lat,
-          ]);
+        {/* Outer casing line for selected route to give clean border */}
+        {selectedRoute && (
+          <MapRoute
+            key={`casing-${selectedRoute.id}`}
+            id={`route-casing-${selectedRoute.id}`}
+            coordinates={
+              selectedRoute.coordinates && selectedRoute.coordinates.length >= 2
+                ? selectedRoute.coordinates
+                : (selectedRoute.geometry_latlng || []).map(([lat, lng]) => [lng, lat])
+            }
+            color="#1d4ed8"
+            width={10.5}
+            opacity={0.65}
+          />
+        )}
+
+        {sortedRoutes.map((route) => {
+          const selected = String(route.id) === String(effectiveSelectedId);
+          const coords =
+            route.coordinates && route.coordinates.length >= 2
+              ? route.coordinates
+              : (route.geometry_latlng || []).map(([lat, lng]) => [
+                lng,
+                lat,
+              ]);
           return (
             <MapRoute
               key={route.id}
               id={`route-${route.id}`}
               coordinates={coords}
               color={routeColor(route, selected)}
-              width={selected ? 7 : 4}
-              opacity={selected ? 0.95 : 0.4}
+              width={selected ? 7.5 : 4.5}
+              opacity={selected ? 1.0 : 0.45}
+              interactive={true}
               onClick={() => onSelectRoute?.(route.id)}
             />
           );
         })}
 
-        {origin && (
-          <MapMarker longitude={origin.lng} latitude={origin.lat}>
+        {origin && origin.lat != null && origin.lng != null && (
+          <MapMarker
+            longitude={origin.lng}
+            latitude={origin.lat}
+            anchor="center"
+          >
             <MarkerContent>
               <div className="sr-user-dot-wrap">
                 <div className="sr-user-pulse"></div>
@@ -132,8 +179,12 @@ export default function PlannerMap({
           </MapMarker>
         )}
 
-        {destination && (
-          <MapMarker longitude={destination.lng} latitude={destination.lat}>
+        {destination && destination.lat != null && destination.lng != null && (
+          <MapMarker
+            longitude={destination.lng}
+            latitude={destination.lat}
+            anchor="bottom"
+          >
             <MarkerContent>
               <div className="sr-dest-pin">
                 <span></span>

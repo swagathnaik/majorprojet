@@ -73,6 +73,8 @@ export const contactsApi = {
     apiRequest(`/contacts/${id}/primary`, { method: "PATCH", token }),
   remove: (token, id) =>
     apiRequest(`/contacts/${id}`, { method: "DELETE", token }),
+  testWhatsapp: (token, id) =>
+    apiRequest(`/contacts/${id}/test-whatsapp`, { method: "POST", token }),
 };
 
 export const journeysApi = {

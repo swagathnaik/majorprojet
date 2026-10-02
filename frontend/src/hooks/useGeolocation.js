@@ -98,13 +98,13 @@ export function useGeolocation({ enabled = false } = {}) {
       return fallback;
     }
 
-    // Step 1: Try high accuracy (with quick 5s timeout)
+    // Step 1: Try high accuracy (allowing fresh cached positions up to 60s)
     const tryHigh = () =>
       new Promise((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(
           (pos) => resolve(mapPosition(pos)),
           (err) => reject(err),
-          { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+          { enableHighAccuracy: true, timeout: 6000, maximumAge: 60000 }
         );
       });
 
@@ -114,7 +114,7 @@ export function useGeolocation({ enabled = false } = {}) {
         navigator.geolocation.getCurrentPosition(
           (pos) => resolve(mapPosition(pos)),
           (err) => reject(err),
-          { enableHighAccuracy: false, timeout: 8000, maximumAge: 30000 }
+          { enableHighAccuracy: false, timeout: 6000, maximumAge: 120000 }
         );
       });
 
@@ -135,7 +135,7 @@ export function useGeolocation({ enabled = false } = {}) {
         setIsLocating(false);
         return pos;
       } catch (lowErr) {
-        // Step 3: Browser geolocation failed completely (e.g. desktop with no WiFi or permission denied)
+        // Step 3: Browser geolocation failed (e.g. desktop with no GPS or permission denied)
         const msg = geoErrorMessage(lowErr);
         if (lowErr.code === lowErr.PERMISSION_DENIED) {
           setPermissionState("denied");
@@ -161,9 +161,9 @@ export function useGeolocation({ enabled = false } = {}) {
     }
 
     // Initial position fetch
-    requestOnce().catch(() => {});
+    requestOnce().catch(() => { });
 
-    // Start watchPosition with standard options (resilient to desktop GPS absence)
+    // Start watchPosition with high accuracy for mobile/GPS devices
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         setPosition(mapPosition(pos));
@@ -177,7 +177,7 @@ export function useGeolocation({ enabled = false } = {}) {
           setError(geoErrorMessage(geoError));
         }
       },
-      { enableHighAccuracy: false, timeout: 12000, maximumAge: 10000 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
     );
 
     return clearWatch;

@@ -985,6 +985,7 @@ a:hover {
     opacity: 0;
     transform: scale(0.92) translateY(12px);
   }
+
   to {
     opacity: 1;
     transform: scale(1) translateY(0);
@@ -1178,34 +1179,54 @@ a:hover {
   font-size: 0.88rem;
 }
 
-/* Blue Google-like user location */
+/* MapLibre marker root elements must be absolute-positioned without flow offsets */
+.maplibregl-marker,
+.mapcn-marker {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  will-change: transform !important;
+  user-select: none;
+  pointer-events: auto;
+  z-index: 10;
+}
+
+/* Blue Google-like user location - centered dot */
 .sr-user-dot-wrap {
   position: relative;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
 }
 
 .sr-user-dot {
   position: absolute;
-  inset: 4px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: #1a73e8;
-  border: 2px solid #fff;
-  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+  border: 2.5px solid #fff;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
+  z-index: 2;
 }
 
 .sr-user-pulse {
   position: absolute;
-  inset: 0;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   background: rgba(26, 115, 232, 0.35);
-  animation: sr-pulse 1.8s ease-out infinite;
+  animation: sr-pulse 2s ease-out infinite;
+  z-index: 1;
 }
 
 @keyframes sr-pulse {
   0% {
-    transform: scale(0.6);
-    opacity: 0.8;
+    transform: scale(0.5);
+    opacity: 0.9;
   }
 
   100% {
@@ -1219,26 +1240,43 @@ a:hover {
   height: 14px;
   border-radius: 50%;
   background: #34a853;
-  border: 2px solid #fff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  border: 2.5px solid #fff;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
 }
 
+/* Red Google Maps–style Destination Pin pointing exactly at bottom */
 .sr-dest-pin {
   width: 28px;
-  height: 40px;
+  height: 35px;
   position: relative;
+  cursor: pointer;
+  pointer-events: auto;
 }
 
 .sr-dest-pin span {
   display: block;
-  width: 22px;
-  height: 22px;
-  margin: 0 auto;
+  width: 24px;
+  height: 24px;
   background: #ea4335;
   border-radius: 50% 50% 50% 0;
   transform: rotate(-45deg);
-  border: 2px solid #fff;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  border: 2.5px solid #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  position: absolute;
+  top: 1px;
+  left: 2px;
+}
+
+.sr-dest-pin span::after {
+  content: "";
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+  position: absolute;
+  top: 6px;
+  left: 6px;
 }
 
 .leaflet-container {
@@ -2063,4 +2101,4 @@ body.dark .gmaps-fab:hover,
     margin-bottom: 0.4rem;
     padding: 0 0.75rem;
   }
-}
+}

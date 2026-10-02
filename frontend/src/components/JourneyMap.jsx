@@ -2,7 +2,7 @@
  * Live journey map using mapcn (MapLibre GL JS).
  * Shows planned safer path + live GPS trail with smooth camera following.
  */
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   Map,
   MapControls,
@@ -17,29 +17,42 @@ const DEFAULT_ZOOM = 16;
 
 function FollowUser({ position, followMode }) {
   const { map, isLoaded } = useMap();
+  const lastCoordsRef = useRef(null);
 
   useEffect(() => {
-    if (isLoaded && map && followMode && position?.lat != null && position?.lng != null) {
-      map.panTo([position.lng, position.lat], { duration: 500 });
+    if (!isLoaded || !map || !followMode || position?.lat == null || position?.lng == null) {
+      return;
     }
-  }, [map, isLoaded, position, followMode]);
+    const prev = lastCoordsRef.current;
+    if (
+      prev &&
+      Math.abs(prev.lat - position.lat) < 0.00003 &&
+      Math.abs(prev.lng - position.lng) < 0.00003
+    ) {
+      return;
+    }
+    lastCoordsRef.current = { lat: position.lat, lng: position.lng };
+    map.panTo([position.lng, position.lat], { duration: 600 });
+  }, [map, isLoaded, position?.lat, position?.lng, followMode]);
 
   return null;
 }
 
 function FitJourney({ points, dest, user, planned }) {
   const { map, isLoaded } = useMap();
+  const hasFittedRef = useRef(false);
 
   useEffect(() => {
-    if (!isLoaded || !map) return;
+    if (!isLoaded || !map || hasFittedRef.current) return;
 
     const coords = [];
     (planned || []).forEach((p) => coords.push(p));
-    points.forEach((p) => coords.push([p.lng, p.lat]));
+    (points || []).forEach((p) => coords.push([p.lng, p.lat]));
     if (user?.lat != null && user?.lng != null) coords.push([user.lng, user.lat]);
     if (dest?.lat != null && dest?.lng != null) coords.push([dest.lng, dest.lat]);
 
     if (coords.length >= 2) {
+      hasFittedRef.current = true;
       let minLng = coords[0][0],
         maxLng = coords[0][0],
         minLat = coords[0][1],
@@ -57,21 +70,35 @@ function FitJourney({ points, dest, user, planned }) {
           [minLng, minLat],
           [maxLng, maxLat],
         ],
-        { padding: 50, maxZoom: 17, duration: 800 }
+        { padding: 60, maxZoom: 16, duration: 800 }
       );
-    } else if (coords.length === 1) {
-      map.flyTo({ center: coords[0], zoom: DEFAULT_ZOOM, duration: 800 });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, isLoaded]);
+  }, [map, isLoaded, planned, points, user, dest]);
 
   return null;
 }
 
 function plannedLngLat(expectedRoute) {
-  if (!expectedRoute?.coordinates?.length) return [];
-  // expectedRoute coordinates in GeoJSON format are [lng, lat]
-  return expectedRoute.coordinates;
+  if (!expectedRoute) return [];
+  let route = expectedRoute;
+  if (typeof route === "string") {
+    try {
+      route = JSON.parse(route);
+    } catch {
+      return [];
+    }
+  }
+  if (!route) return [];
+  if (Array.isArray(route.coordinates) && route.coordinates.length) {
+    return route.coordinates;
+  }
+  if (Array.isArray(route.geometry_latlng) && route.geometry_latlng.length) {
+    return route.geometry_latlng.map(([lat, lng]) => [lng, lat]);
+  }
+  if (Array.isArray(route) && route.length) {
+    return route;
+  }
+  return [];
 }
 
 export default function JourneyMap({
@@ -126,14 +153,22 @@ export default function JourneyMap({
 
         {/* Planned safer route */}
         {planned.length >= 2 && (
-          <MapRoute
-            id="journey-planned-route"
-            coordinates={planned}
-            color="#1a73e8"
-            width={6}
-            opacity={0.55}
-            dashArray={[2, 2]}
-          />
+          <>
+            <MapRoute
+              id="journey-planned-route-casing"
+              coordinates={planned}
+              color="#1d4ed8"
+              width={10.5}
+              opacity={0.65}
+            />
+            <MapRoute
+              id="journey-planned-route"
+              coordinates={planned}
+              color="#2563eb"
+              width={7.5}
+              opacity={0.95}
+            />
+          </>
         )}
 
         {/* Live traveled path trail */}
@@ -141,7 +176,7 @@ export default function JourneyMap({
           <MapRoute
             id="journey-traveled-path"
             coordinates={linePositions}
-            color="#34a853"
+            color="#22c55e"
             width={5}
             opacity={0.95}
           />
@@ -149,7 +184,11 @@ export default function JourneyMap({
 
         {/* Start Point Marker */}
         {start?.lat != null && start?.lng != null && (
-          <MapMarker longitude={start.lng} latitude={start.lat}>
+          <MapMarker
+            longitude={start.lng}
+            latitude={start.lat}
+            anchor="center"
+          >
             <MarkerContent>
               <div className="sr-start-dot"></div>
             </MarkerContent>
@@ -158,7 +197,11 @@ export default function JourneyMap({
 
         {/* Destination Marker */}
         {destination?.lat != null && destination?.lng != null && (
-          <MapMarker longitude={destination.lng} latitude={destination.lat}>
+          <MapMarker
+            longitude={destination.lng}
+            latitude={destination.lat}
+            anchor="bottom"
+          >
             <MarkerContent>
               <div className="sr-dest-pin">
                 <span></span>
@@ -169,7 +212,11 @@ export default function JourneyMap({
 
         {/* Live User Location Pulse */}
         {position?.lat != null && position?.lng != null && (
-          <MapMarker longitude={position.lng} latitude={position.lat}>
+          <MapMarker
+            longitude={position.lng}
+            latitude={position.lat}
+            anchor="center"
+          >
             <MarkerContent>
               <div className="sr-user-dot-wrap">
                 <div className="sr-user-pulse"></div>

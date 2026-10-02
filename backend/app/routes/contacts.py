@@ -6,6 +6,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 
 from app.extensions import db
 from app.models.contact import EmergencyContact
+from app.models.user import User
 
 contacts_bp = Blueprint("contacts", __name__)
 
@@ -211,3 +212,50 @@ def delete_contact(contact_id: int):
 
     db.session.commit()
     return jsonify({"message": "Contact deleted."}), 200
+
+
+
+@contacts_bp.post("/<int:contact_id>/test-whatsapp")
+@jwt_required()
+def send_test_whatsapp(contact_id: int):
+    """Send a test WhatsApp message via Meta Cloud API to verify gateway delivery to this emergency contact."""
+    user_id = _current_user_id()
+    contact = _get_owned_contact(contact_id, user_id)
+    if not contact:
+        return jsonify({"error": "Contact not found."}), 404
+
+    user = db.session.get(User, user_id)
+    from app.services.notify import notify_test_whatsapp
+
+    res = notify_test_whatsapp(contact, user)
+    delivery = res.get("delivery", {})
+
+    if delivery.get("whatsapp_sent"):
+        provider = delivery.get("whatsapp_provider") or "Meta WhatsApp Cloud API"
+        return (
+            jsonify(
+                {
+                    "message": f"Test WhatsApp message sent successfully to {contact.name} ({contact.phone}) via {provider}.",
+                    "delivery": delivery,
+                    "payload": res,
+                }
+            ),
+            200,
+        )
+
+    errors = [ch for ch in delivery.get("channels", []) if "whatsapp_cloud_failed" in str(ch)]
+    err_text = (
+        errors[0]
+        if errors
+        else "Could not send WhatsApp message. Ensure WHATSAPP_CLOUD_API_TOKEN and WHATSAPP_PHONE_NUMBER_ID are configured in backend/.env"
+    )
+    return (
+        jsonify(
+            {
+                "error": f"Failed to send WhatsApp message: {err_text}",
+                "delivery": delivery,
+                "payload": res,
+            }
+        ),
+        400,
+    )

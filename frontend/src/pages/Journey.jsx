@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { journeysApi, safetyApi } from "../api/client";
 import { useGeolocation } from "../hooks/useGeolocation";
@@ -22,17 +22,21 @@ function contactNotifyMessage(notifications, fallback) {
     return fallback;
   }
   const names = notifications.map((n) => n.contact_name).filter(Boolean);
-  const smsFailed = notifications.some((n) =>
-    (n.delivery?.channels || []).some((ch) => String(ch).includes("sms_failed"))
-  );
+  const cloudFailed = notifications.some((n) => {
+    const channels = n.delivery?.channels || [];
+    return (
+      channels.some((ch) => String(ch).includes("failed")) ||
+      !n.delivery?.whatsapp_sent
+    );
+  });
   let msg = fallback;
   if (names.length) {
-    msg = `${fallback} — message sent to ${names.join(", ")}.`;
+    msg = `${fallback} to ${names.join(", ")}.`;
   } else {
-    msg = `${fallback} — ${notifications.length} contact(s) notified.`;
+    msg = `${fallback} (${notifications.length} contact(s)).`;
   }
-  if (smsFailed) {
-    msg += " (Use 📲 WhatsApp / 💬 SMS buttons below for instant 1-click delivery).";
+  if (cloudFailed) {
+    msg += " (Cloud gateway expired or unprovisioned — tap 📲 Send WhatsApp below for instant 1-click delivery).";
   }
   return msg;
 }
@@ -67,13 +71,27 @@ export default function Journey() {
   const inProgress = ["active", "paused", "sos"].includes(journey?.status);
 
   const { position, error: geoError, permissionState } = useGeolocation({
-    enabled: isLive || journey?.status === "paused",
+    enabled: isLive || journey?.status === "paused" || journey?.status === "sos",
   });
+
+  const positionRef = useRef(position);
+  useEffect(() => {
+    positionRef.current = position;
+  }, [position]);
+
+  const journeyId = journey?.id;
+  const journeyStatus = journey?.status;
 
   function applyMonitoringPayload(data) {
     if (data.monitoring) setMonitoring(data.monitoring);
     if (data.open_anomalies) setOpenAnomalies(data.open_anomalies);
     if ("active_safety_check" in data) setSafetyCheck(data.active_safety_check);
+    if (data.journey && data.journey.status === "sos") {
+      setJourney((prev) => (prev?.status === "sos" ? prev : data.journey));
+    }
+    if (data.sos) {
+      setSosAlert(data.sos);
+    }
     if (data.newly_created_anomalies?.length) {
       setStatusMsg(
         `Anomaly detected: ${data.newly_created_anomalies
@@ -132,12 +150,12 @@ export default function Journey() {
   }, [token, refreshActive]);
 
   useEffect(() => {
-    if (!inProgress || !journey) return undefined;
+    if (!inProgress || !journeyId) return undefined;
     let cancelled = false;
 
     async function tick() {
       try {
-        const mon = await journeysApi.monitoring(token, journey.id);
+        const mon = await journeysApi.monitoring(token, journeyId);
         if (!cancelled) applyMonitoringPayload(mon);
       } catch {
         /* ignore */
@@ -150,14 +168,17 @@ export default function Journey() {
       cancelled = true;
       clearInterval(id);
     };
-  }, [inProgress, journey, token]);
+  }, [inProgress, journeyId, token]);
 
   useEffect(() => {
-    if (!isLive || !journey || !position) return;
+    if ((!isLive && journeyStatus !== "sos") || !journeyId) return;
 
     const intervalMs = intervalSec * 1000;
 
     async function sendIfDue() {
+      const pos = positionRef.current;
+      if (!pos || pos.lat == null || pos.lng == null) return;
+
       const now = Date.now();
       if (now - lastSentAtRef.current < intervalMs - 200) return;
       lastSentAtRef.current = now;
@@ -165,14 +186,14 @@ export default function Journey() {
         if (!navigator.onLine) {
           enqueueOffline({
             kind: "location",
-            journeyId: journey.id,
-            payload: position,
+            journeyId: journeyId,
+            payload: pos,
           });
           setOfflinePending(pendingOfflineCount());
           setStatusMsg("Offline — location queued for sync.");
           return;
         }
-        const data = await journeysApi.postLocation(token, journey.id, position);
+        const data = await journeysApi.postLocation(token, journeyId, pos);
         setStatusMsg(`Location synced · ${new Date().toLocaleTimeString()}`);
         if (data.interval_sec) setIntervalSec(data.interval_sec);
         setLogs((prev) => [...prev, data.location].slice(-200));
@@ -181,7 +202,7 @@ export default function Journey() {
         setError("");
       } catch (err) {
         const msg = (err?.message || "").toLowerCase();
-        if (msg.includes("active journey") || msg.includes("not found")) {
+        if (msg.includes("not found") || (msg.includes("active journey") && journeyStatus !== "sos")) {
           // Journey ended or is no longer active on server
           setJourney((prev) => (prev ? { ...prev, status: "completed" } : null));
           refreshActive();
@@ -189,8 +210,8 @@ export default function Journey() {
         }
         enqueueOffline({
           kind: "location",
-          journeyId: journey.id,
-          payload: position,
+          journeyId: journeyId,
+          payload: pos,
         });
         setOfflinePending(pendingOfflineCount());
         setError(err.message || "Failed to upload location — queued offline.");
@@ -200,7 +221,7 @@ export default function Journey() {
     sendIfDue();
     const id = setInterval(sendIfDue, intervalMs);
     return () => clearInterval(id);
-  }, [isLive, journey, position, token, intervalSec, refreshActive]);
+  }, [isLive, journeyStatus, journeyId, token, intervalSec, refreshActive]);
 
 function sendBrowserNotification(title, options) {
   try {
@@ -340,6 +361,14 @@ function sendBrowserNotification(title, options) {
         return [data.anomaly, ...next];
       });
       if (data.active_safety_check) setSafetyCheck(data.active_safety_check);
+      if (data.journey) setJourney(data.journey);
+      if (data.sos) {
+        setSosAlert(data.sos);
+        sendBrowserNotification("🚨 Emergency SOS Triggered", {
+          body: `Automatic SOS activated for simulated ${type}.`,
+          tag: "sos_alert",
+        });
+      }
       setStatusMsg(data.message || "Simulated anomaly created.");
     } catch (err) {
       setError(err.message || "Simulate failed.");
@@ -448,25 +477,28 @@ function sendBrowserNotification(title, options) {
     }
   }
 
-  const mapPosition =
-    position ||
-    (logs.length
-      ? { lat: logs[logs.length - 1].lat, lng: logs[logs.length - 1].lng }
-      : null);
+  const mapPosition = useMemo(() => {
+    if (position?.lat != null && position?.lng != null) return position;
+    if (logs.length) {
+      const last = logs[logs.length - 1];
+      return { lat: last.lat, lng: last.lng };
+    }
+    return null;
+  }, [position?.lat, position?.lng, logs]);
 
-  const destination =
-    journey?.dest_lat != null && journey?.dest_lng != null
-      ? {
-        lat: journey.dest_lat,
-        lng: journey.dest_lng,
-        label: journey.dest_label,
-      }
-      : null;
+  const destination = useMemo(() => {
+    if (journey?.dest_lat == null || journey?.dest_lng == null) return null;
+    return {
+      lat: journey.dest_lat,
+      lng: journey.dest_lng,
+      label: journey.dest_label,
+    };
+  }, [journey?.dest_lat, journey?.dest_lng, journey?.dest_label]);
 
-  const startPoint =
-    journey?.start_lat != null && journey?.start_lng != null
-      ? { lat: journey.start_lat, lng: journey.start_lng }
-      : null;
+  const startPoint = useMemo(() => {
+    if (journey?.start_lat == null || journey?.start_lng == null) return null;
+    return { lat: journey.start_lat, lng: journey.start_lng };
+  }, [journey?.start_lat, journey?.start_lng]);
 
   return (
     <main

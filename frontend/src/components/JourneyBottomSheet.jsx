@@ -234,14 +234,6 @@ export default function JourneyBottomSheet({
                       📲 Send WhatsApp Msg
                     </a>
                     <a
-                      className="btn btn-sm btn-sms"
-                      href={`sms:${journey.contact.phone.replace(/\D/g, "")}?body=${encodeURIComponent(
-                        `SOS ALERT! I need help! Track: ${shareUrl}`
-                      )}`}
-                    >
-                      💬 Send SMS
-                    </a>
-                    <a
                       className="btn btn-sm btn-call"
                       href={`tel:${journey.contact.phone}`}
                     >

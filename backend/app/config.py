@@ -45,10 +45,15 @@ class Config:
     FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
     SIMULATE_POOR_NETWORK = os.getenv("SIMULATE_POOR_NETWORK", "false").lower() == "true"
 
-    # Vonage SMS to emergency contact phone numbers
-    VONAGE_API_KEY = os.getenv("VONAGE_API_KEY", "")
-    VONAGE_API_SECRET = os.getenv("VONAGE_API_SECRET", "")
-    VONAGE_FROM_NUMBER = os.getenv("VONAGE_FROM_NUMBER", "Vonage APIs")
-
     # Mapbox Geocoding & Maps
     MAPBOX_ACCESS_TOKEN = os.getenv("MAPBOX_ACCESS_TOKEN", "")
+
+    # Meta WhatsApp Cloud API (Automatic SOS & Emergency WhatsApp)
+    WHATSAPP_CLOUD_API_TOKEN = os.getenv("WHATSAPP_CLOUD_API_TOKEN", "")
+    WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
+    WHATSAPP_API_VERSION = os.getenv("WHATSAPP_API_VERSION", "v21.0")
+    WHATSAPP_TEMPLATE_NAME = os.getenv("WHATSAPP_TEMPLATE_NAME", "")
+    WHATSAPP_TEMPLATE_LANG = os.getenv("WHATSAPP_TEMPLATE_LANG", "en_US")
+    SEND_WHATSAPP_ON_JOURNEY_START = (
+        os.getenv("SEND_WHATSAPP_ON_JOURNEY_START", "false").lower() == "true"
+    )

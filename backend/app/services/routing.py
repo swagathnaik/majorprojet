@@ -306,6 +306,8 @@ def geocode_search(query: str, limit: int = 5) -> list[dict]:
             combined.append(c)
             seen_labels.add(c["label"])
 
+    return combined[:limit]
+
 REVERSE_GEOCODE_CACHE: dict[str, dict] = {}
 
 
@@ -357,23 +359,49 @@ def reverse_geocode(lat: float, lng: float) -> dict:
 
 def get_ip_location(client_ip: str | None = None) -> dict:
     """Resolve approximate location from IP address for fallback."""
+    # 1. Try ip-api.com
+    try:
+        url = "http://ip-api.com/json/"
+        if client_ip and client_ip not in ("127.0.0.1", "localhost", "::1"):
+            url = f"http://ip-api.com/json/{client_ip}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if isinstance(data, dict) and data.get("status") == "success":
+                lat = float(data["lat"])
+                lng = float(data["lon"])
+                city = data.get("city") or "Bengaluru"
+                region = data.get("regionName") or "Karnataka"
+                return {
+                    "lat": lat,
+                    "lng": lng,
+                    "label": f"{city}, {region}",
+                    "city": city,
+                    "source": "ip",
+                }
+    except Exception:
+        pass
+
+    # 2. Try geojs.io with browser User-Agent
     try:
         url = "https://get.geojs.io/v1/ip/geo.json"
         if client_ip and client_ip not in ("127.0.0.1", "localhost", "::1"):
             url = f"https://get.geojs.io/v1/ip/geo/{client_ip}.json"
-        data = _http_get_json(url, timeout=5)
-        if isinstance(data, dict) and "latitude" in data and "longitude" in data:
-            lat = float(data["latitude"])
-            lng = float(data["longitude"])
-            city = data.get("city") or "Bengaluru"
-            region = data.get("region") or "Karnataka"
-            return {
-                "lat": lat,
-                "lng": lng,
-                "label": f"{city}, {region}",
-                "city": city,
-                "source": "ip",
-            }
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if isinstance(data, dict) and "latitude" in data and "longitude" in data:
+                lat = float(data["latitude"])
+                lng = float(data["longitude"])
+                city = data.get("city") or "Bengaluru"
+                region = data.get("region") or "Karnataka"
+                return {
+                    "lat": lat,
+                    "lng": lng,
+                    "label": f"{city}, {region}",
+                    "city": city,
+                    "source": "ip",
+                }
     except Exception:
         pass
 

@@ -1,8 +1,8 @@
 """
-Trusted-contact notifications (Phase 10–12).
+Trusted-contact notifications.
 
-Vonage SMS gateway for SOS alerts.
-Direct WhatsApp and SMS 1-click fallback links.
+Meta WhatsApp Cloud API for SOS alerts.
+Direct WhatsApp 1-click fallback links.
 In-app notification logging.
 """
 from __future__ import annotations
@@ -12,7 +12,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from flask import current_app, request
@@ -69,6 +69,41 @@ def notify_journey_started(journey: Journey, contact: EmergencyContact | None) -
     return payload
 
 
+def _format_sos_message(
+    traveler_name: str,
+    lat: float | None = None,
+    lng: float | None = None,
+    share_url: str = "",
+    at_iso: str | None = None,
+) -> str:
+    """Format emergency alert message matching standard SafeRoute emergency template."""
+    try:
+        if at_iso:
+            dt_utc = datetime.fromisoformat(at_iso.replace("Z", "+00:00"))
+        else:
+            dt_utc = datetime.now(timezone.utc)
+        dt_ist = dt_utc + timedelta(hours=5, minutes=30)
+        time_str = dt_ist.strftime("%H:%M, %d %b %Y")
+    except Exception:
+        time_str = datetime.now().strftime("%H:%M, %d %b %Y")
+
+    if lat is not None and lng is not None:
+        loc_str = f"https://maps.google.com/?q={lat:.5f},{lng:.5f}"
+    else:
+        loc_str = "https://maps.google.com/?q=12.9716,77.5946"
+
+    track_line = f"\nLive Tracking: {share_url}" if share_url else ""
+
+    return (
+        f"🚨 SOS! EMERGENCY DETECTED\n\n"
+        f"{traveler_name} has triggered an SOS alert through SafeRoute.\n\n"
+        f"📍 Location: {loc_str}\n"
+        f"🕐 {time_str}\n"
+        f"⚠️ Status: Immediate assistance required{track_line}\n\n"
+        f"Please check their location and contact them immediately."
+    )
+
+
 def notify_sos(
     journey: Journey,
     alert: SosAlert,
@@ -77,9 +112,13 @@ def notify_sos(
     """Notify one trusted contact when SOS is created."""
     user = User.query.get(journey.user_id)
     share_url = journey_share_url(journey)
-    loc = ""
-    if alert.lat is not None and alert.lng is not None:
-        loc = f" Location: {alert.lat:.5f}, {alert.lng:.5f}."
+    traveler_name = user.name if user else "Traveler"
+    sos_msg = _format_sos_message(
+        traveler_name=traveler_name,
+        lat=alert.lat,
+        lng=alert.lng,
+        share_url=share_url,
+    )
     payload = {
         "event": "sos_alert",
         "channel": "emergency",
@@ -90,17 +129,13 @@ def notify_sos(
         "reason": alert.trigger_reason,
         "lat": alert.lat,
         "lng": alert.lng,
-        "traveler": user.name if user else "Traveler",
+        "traveler": traveler_name,
         "contact_id": contact.id if contact else None,
         "contact_name": contact.name if contact else None,
         "contact_phone": contact.phone if contact else None,
         "share_url": share_url,
         "call_112_hint": "Optional: dial 112 (India emergency) if life is at risk.",
-        "message": (
-            f"SOS for {user.name if user else 'traveler'} "
-            f"({alert.type}): {alert.trigger_reason or 'emergency'}."
-            f"{loc} Track: {share_url}"
-        ),
+        "message": sos_msg,
     }
     delivery = _deliver(payload, contact)
     if delivery.get("network") == "degraded":
@@ -148,7 +183,7 @@ def notify_sos_all_contacts(journey: Journey, alert: SosAlert) -> list[dict]:
 
 
 def _normalize_phone_e164_digits(phone: str) -> str:
-    """Normalize phone number to international digits for Vonage API (e.g., 919901533228)."""
+    """Normalize phone number to international digits (e.g., 919901533228)."""
     digits = re.sub(r"\D", "", phone or "")
     if digits.startswith("91") and len(digits) == 12:
         return digits
@@ -157,87 +192,257 @@ def _normalize_phone_e164_digits(phone: str) -> str:
     return digits
 
 
-def _vonage_configured() -> bool:
+def _alert_text(payload: dict) -> str:
+    """Compact or full emergency alert body for WhatsApp message."""
+    if payload.get("event") == "sos_alert":
+        return payload.get("message") or _format_sos_message(
+            traveler_name=payload.get("traveler") or "Traveler",
+            lat=payload.get("lat"),
+            lng=payload.get("lng"),
+            share_url=payload.get("share_url") or "",
+            at_iso=payload.get("at"),
+        )
+    return (payload.get("message") or "")[:480]
+
+
+def _whatsapp_cloud_configured() -> bool:
     return bool(
-        current_app.config.get("VONAGE_API_KEY")
-        and current_app.config.get("VONAGE_API_SECRET")
+        current_app.config.get("WHATSAPP_CLOUD_API_TOKEN")
+        and current_app.config.get("WHATSAPP_PHONE_NUMBER_ID")
     )
 
 
-def _send_sms_vonage(to_phone: str, body: str) -> None:
-    api_key = current_app.config["VONAGE_API_KEY"]
-    api_secret = current_app.config["VONAGE_API_SECRET"]
-    from_num = current_app.config.get("VONAGE_FROM_NUMBER") or "Vonage APIs"
+def _whatsapp_api_url() -> str:
+    phone_number_id = str(current_app.config.get("WHATSAPP_PHONE_NUMBER_ID", "")).strip()
+    version = str(current_app.config.get("WHATSAPP_API_VERSION", "v21.0")).strip() or "v21.0"
+    return f"https://graph.facebook.com/{version}/{phone_number_id}/messages"
 
-    to_num = _normalize_phone_e164_digits(to_phone)
-    url = "https://rest.nexmo.com/sms/json"
-    payload = {
-        "api_key": api_key,
-        "api_secret": api_secret,
-        "from": from_num,
-        "to": to_num,
-        "text": body,
-    }
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, method="POST")
-    req.add_header("Content-Type", "application/json")
+
+def _send_whatsapp_cloud_raw(payload_dict: dict) -> dict:
+    """Send arbitrary JSON payload to Meta WhatsApp Cloud API messages endpoint."""
+    token = str(current_app.config.get("WHATSAPP_CLOUD_API_TOKEN", "")).strip()
+    url = _whatsapp_api_url()
+    data = json.dumps(payload_dict).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
 
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw_res = resp.read().decode("utf-8", errors="replace")
             res_data = json.loads(raw_res) if raw_res else {}
-            current_app.logger.info("Vonage SMS API Response: %s", res_data)
-            messages = res_data.get("messages") or []
-            if messages and messages[0].get("status") != "0":
-                err_text = messages[0].get("error-text", "Unknown Vonage error")
-                raise RuntimeError(f"Vonage SMS error {messages[0].get('status')}: {err_text}")
+            current_app.logger.info("Meta WhatsApp Cloud API Response: %s", res_data)
+            return res_data
     except urllib.error.HTTPError as err:
-
-        detail = err.read().decode("utf-8", errors="replace")[:200]
-        raise RuntimeError(f"Vonage HTTP {err.code}: {detail}") from err
-
-
-def _sms_text(payload: dict) -> str:
-    """Compact SMS body."""
-    if payload.get("event") == "sos_alert":
-        traveler = payload.get("traveler") or "Traveler"
-        reason = (payload.get("reason") or "emergency")[:100]
-        share = payload.get("share_url") or ""
-        loc = ""
-        if payload.get("lat") is not None and payload.get("lng") is not None:
-            loc = f" @ {payload['lat']:.4f},{payload['lng']:.4f}"
-        return f"SOS! {traveler}: {reason}{loc}. Track: {share}"[:480]
-    return (payload.get("message") or "")[:480]
+        detail = err.read().decode("utf-8", errors="replace")
+        err_msg = detail
+        err_code = err.code
+        try:
+            err_json = json.loads(detail)
+            error_obj = err_json.get("error", {})
+            err_msg = error_obj.get("message") or detail
+            err_code = error_obj.get("code") or err.code
+        except Exception:
+            pass
+        raise RuntimeError(f"Meta WhatsApp Cloud API error ({err_code}): {err_msg}") from err
 
 
-def _deliver(payload: dict, contact: EmergencyContact | None) -> dict:
+def _send_whatsapp_cloud_text(to_phone: str, body: str, preview_url: bool = True) -> dict:
+    """Send a direct text message via Meta WhatsApp Cloud API."""
+    to_num = _normalize_phone_e164_digits(to_phone)
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to_num,
+        "type": "text",
+        "text": {
+            "preview_url": preview_url,
+            "body": body,
+        },
+    }
+    return _send_whatsapp_cloud_raw(payload)
+
+
+def _send_whatsapp_cloud_location(
+    to_phone: str,
+    lat: float,
+    lng: float,
+    name: str = "🚨 SOS Emergency Location",
+    address: str = "SafeRoute Alert",
+) -> dict:
+    """Send an interactive GPS location pin card via Meta WhatsApp Cloud API."""
+    to_num = _normalize_phone_e164_digits(to_phone)
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to_num,
+        "type": "location",
+        "location": {
+            "latitude": float(lat),
+            "longitude": float(lng),
+            "name": name,
+            "address": address,
+        },
+    }
+    return _send_whatsapp_cloud_raw(payload)
+
+
+def _send_whatsapp_cloud_template(
+    to_phone: str,
+    template_name: str,
+    lang_code: str = "en_US",
+    components: list[dict] | None = None,
+) -> dict:
+    """Send a pre-approved Meta WhatsApp template message."""
+    to_num = _normalize_phone_e164_digits(to_phone)
+    tmpl: dict = {
+        "name": template_name,
+        "language": {"code": lang_code},
+    }
+    if components:
+        tmpl["components"] = components
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to_num,
+        "type": "template",
+        "template": tmpl,
+    }
+    return _send_whatsapp_cloud_raw(payload)
+
+
+def _send_whatsapp_cloud_sos(to_phone: str, payload: dict) -> dict:
     """
-    Attempt Vonage SMS delivery.
-    Always attaches direct WhatsApp/SMS action URLs for 1-click fallback.
+    Emergency dispatch:
+    1. Dispatches rich SafeRoute SOS text message with live tracking link and emergency details.
+    2. If lat & lng are present, dispatches the native WhatsApp GPS location pin card.
+    3. If text dispatch encounters policy constraints and a custom template (other than hello_world)
+       is configured, falls back to that template.
+    """
+    text_body = _alert_text(payload)
+    traveler = payload.get("traveler") or "Traveler"
+    lat = payload.get("lat")
+    lng = payload.get("lng")
+    template_name = (current_app.config.get("WHATSAPP_TEMPLATE_NAME") or "").strip()
+    template_lang = (current_app.config.get("WHATSAPP_TEMPLATE_LANG") or "en_US").strip()
+
+    results: dict = {"text_sent": False, "location_sent": False, "template_sent": False}
+    text_error = None
+
+    # Step 1: Dispatch rich custom SafeRoute SOS text message
+    try:
+        res_text = _send_whatsapp_cloud_text(to_phone, text_body)
+        results["text_sent"] = True
+        results["text_response"] = res_text
+    except Exception as txt_err:
+        text_error = txt_err
+        current_app.logger.warning("WhatsApp text dispatch failed: %s", txt_err)
+
+    # Step 2: Also dispatch template (guarantees delivery to handset even if 24-hr session was closed)
+    tmpl_name = template_name or "hello_world"
+    try:
+        res_tmpl = _send_whatsapp_cloud_template(to_phone, tmpl_name, template_lang)
+        results["template_sent"] = True
+        results["template_response"] = res_tmpl
+    except Exception as tmpl_err:
+        current_app.logger.warning("WhatsApp template dispatch note: %s", tmpl_err)
+        if not results["text_sent"]:
+            raise RuntimeError(f"Text failed ({text_error}); Template failed ({tmpl_err})") from tmpl_err
+
+    # Step 3: Dispatch interactive GPS location pin if coordinates are valid
+    if lat is not None and lng is not None:
+        try:
+            loc_res = _send_whatsapp_cloud_location(
+                to_phone=to_phone,
+                lat=float(lat),
+                lng=float(lng),
+                name=f"🚨 SOS: {traveler}",
+                address=f"Location: {lat:.5f}, {lng:.5f}",
+            )
+            results["location_sent"] = True
+            results["location_response"] = loc_res
+        except Exception as loc_err:
+            current_app.logger.warning("WhatsApp location pin attempt failed: %s", loc_err)
+            results["location_error"] = str(loc_err)
+
+    return results
+
+
+def notify_test_whatsapp(contact: EmergencyContact, user: User | None) -> dict:
+    """Send a test WhatsApp message via Meta Cloud API to verify gateway functionality."""
+    traveler = user.name if user else "Traveler"
+    payload = {
+        "event": "test_alert",
+        "channel": "emergency_test_whatsapp",
+        "at": datetime.now(timezone.utc).isoformat(),
+        "traveler": traveler,
+        "contact_id": contact.id,
+        "contact_name": contact.name,
+        "contact_phone": contact.phone,
+        "message": (
+            f"SafeRoute Alert Test: Meta WhatsApp Cloud API alert is connected for {traveler}. "
+            f"You are registered as an emergency contact."
+        ),
+    }
+
+    delivery = _deliver(payload, contact, force_whatsapp=True)
+    payload["delivery"] = delivery
+    _append_log(payload)
+    return payload
+
+
+def _deliver(
+    payload: dict,
+    contact: EmergencyContact | None,
+    force_whatsapp: bool = False,
+) -> dict:
+    """
+    Attempt WhatsApp delivery via Meta WhatsApp Cloud API.
+    Always attaches direct WhatsApp action URL for 1-click fallback.
     """
     channels = ["in_app_log"]
-    sms_ok = False
-    sms_provider = None
+    wa_ok = False
+    wa_provider = None
 
     if contact and contact.phone:
         digits = re.sub(r"\D", "", contact.phone or "")
         int_phone = f"91{digits}" if len(digits) == 10 else digits
         msg_text = payload.get("message") or "EMERGENCY SOS ALERT"
         payload["whatsapp_url"] = f"https://wa.me/{int_phone}?text={urllib.parse.quote(msg_text)}"
-        payload["sms_url"] = f"sms:{digits}?body={urllib.parse.quote(msg_text)}"
 
-        if _vonage_configured() and payload.get("event") == "sos_alert":
+        is_sos = payload.get("event") == "sos_alert"
+        is_test = payload.get("event") == "test_alert"
+        is_journey_start = payload.get("event") == "journey_started"
+
+        # --- Meta WhatsApp Cloud API Dispatch ---
+        has_whatsapp = _whatsapp_cloud_configured()
+        send_wa_on_start = bool(current_app.config.get("SEND_WHATSAPP_ON_JOURNEY_START"))
+        should_send_wa = force_whatsapp or (
+            has_whatsapp
+            and (is_sos or is_test or (is_journey_start and send_wa_on_start))
+        )
+
+        if has_whatsapp and should_send_wa:
             try:
-                _send_sms_vonage(contact.phone, _sms_text(payload))
-                channels.append("sms")
-                sms_ok = True
-                sms_provider = "vonage"
+                wa_res = _send_whatsapp_cloud_sos(contact.phone, payload)
+                wa_ok = True
+                wa_provider = "meta_cloud_api"
+                channels.append("whatsapp_cloud")
+                if wa_res.get("location_sent"):
+                    channels.append("whatsapp_cloud_location")
+                if wa_res.get("template_sent"):
+                    channels.append("whatsapp_cloud_template")
             except Exception as err:  # noqa: BLE001
-                channels.append(f"sms_failed:vonage:{err}")
-        elif _vonage_configured():
-            channels.append("sms_skipped_journey_started")
-        else:
-            channels.append("sms_stub")
+                channels.append(f"whatsapp_cloud_failed:{err}")
+        elif has_whatsapp and is_journey_start and not send_wa_on_start:
+            channels.append("whatsapp_skipped_journey_started")
 
     network = "online"
     if current_app.config.get("SIMULATE_POOR_NETWORK"):
@@ -246,10 +451,10 @@ def _deliver(payload: dict, contact: EmergencyContact | None) -> dict:
     return {
         "status": "queued" if network == "degraded" else "recorded",
         "channels": channels,
-        "sms_sent": sms_ok,
-        "sms_provider": sms_provider,
+        "whatsapp_sent": wa_ok,
+        "whatsapp_provider": wa_provider,
         "network": network,
-        "demo": not sms_ok,
+        "demo": not wa_ok,
     }
 
 

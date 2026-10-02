@@ -35,8 +35,8 @@ const MapContext = createContext({
   map: null,
   isLoaded: false,
   theme: "light",
-  toggleTheme: () => {},
-  setTheme: () => {},
+  toggleTheme: () => { },
+  setTheme: () => { },
   styleVersion: 0,
 });
 
@@ -210,8 +210,10 @@ export function Map({
       setIsLoaded(true);
     });
 
-    instance.on("styledata", () => {
-      setStyleVersion((v) => v + 1);
+    instance.on("styledata", (e) => {
+      if (e && e.dataType === "style") {
+        setStyleVersion((v) => v + 1);
+      }
     });
 
     if (onViewportChange) {
@@ -241,10 +243,20 @@ export function Map({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const currentAppliedStyleRef = useRef(null);
+
   // Update style when theme / style prop changes
   useEffect(() => {
     if (!map || !isLoaded) return;
-    map.setStyle(resolveStyle());
+    const targetStyle = resolveStyle();
+    if (currentAppliedStyleRef.current === null) {
+      currentAppliedStyleRef.current = targetStyle;
+      return;
+    }
+    if (currentAppliedStyleRef.current !== targetStyle) {
+      currentAppliedStyleRef.current = targetStyle;
+      map.setStyle(targetStyle);
+    }
   }, [map, isLoaded, resolveStyle]);
 
   // Handle controlled viewport
@@ -408,9 +420,8 @@ export function MapControls({
       btn.title = "Toggle Light / Dark Map Theme";
       btn.setAttribute("aria-label", "Toggle map theme");
       btn.onclick = () => toggleTheme();
-      btn.innerHTML = `<span style="font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center;height:100%;">${
-        theme === "dark" ? "☀️" : "🌙"
-      }</span>`;
+      btn.innerHTML = `<span style="font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center;height:100%;">${theme === "dark" ? "☀️" : "🌙"
+        }</span>`;
       ctrlDiv.appendChild(btn);
 
       const customControl = {
@@ -456,6 +467,7 @@ export function MapMarker({
   latitude,
   children,
   draggable = false,
+  anchor = "center",
   onClick,
   onMouseEnter,
   onMouseLeave,
@@ -466,44 +478,65 @@ export function MapMarker({
 }) {
   const { map, isLoaded } = useMap();
   const markerRef = useRef(null);
-  const elementRef = useRef(document.createElement("div"));
+  const elementRef = useRef(null);
+  if (!elementRef.current) {
+    elementRef.current = document.createElement("div");
+  }
 
+  // Create, update, or remove marker based on coordinates and map readiness
   useEffect(() => {
-    if (!isLoaded || !map || longitude == null || latitude == null) return;
-
-    const el = elementRef.current;
-    el.className = `mapcn-marker ${className}`;
-    el.style.cursor = onClick ? "pointer" : "default";
-
-    if (onClick) el.onclick = onClick;
-    if (onMouseEnter) el.onmouseenter = onMouseEnter;
-    if (onMouseLeave) el.onmouseleave = onMouseLeave;
-
-    const marker = new maplibregl.Marker({
-      element: el,
-      draggable: draggable,
-    })
-      .setLngLat([longitude, latitude])
-      .addTo(map);
-
-    if (draggable) {
-      if (onDragStart) marker.on("dragstart", () => onDragStart(marker.getLngLat()));
-      if (onDrag) marker.on("drag", () => onDrag(marker.getLngLat()));
-      if (onDragEnd) marker.on("dragend", () => onDragEnd(marker.getLngLat()));
+    if (!isLoaded || !map || longitude == null || latitude == null) {
+      if (markerRef.current) {
+        markerRef.current.remove();
+        markerRef.current = null;
+      }
+      return;
     }
 
-    markerRef.current = marker;
+    const numLng = Number(longitude);
+    const numLat = Number(latitude);
+    if (isNaN(numLng) || isNaN(numLat)) {
+      if (markerRef.current) {
+        markerRef.current.remove();
+        markerRef.current = null;
+      }
+      return;
+    }
 
-    return () => {
-      marker.remove();
-      markerRef.current = null;
-    };
+    const el = elementRef.current;
+    el.className = `maplibregl-marker mapcn-marker ${className}`.trim();
+    el.style.position = "absolute";
+    el.style.top = "0";
+    el.style.left = "0";
+    el.style.willChange = "transform";
+    el.style.cursor = onClick ? "pointer" : "default";
+
+    if (!markerRef.current) {
+      const marker = new maplibregl.Marker({
+        element: el,
+        draggable: draggable,
+        anchor: anchor,
+      })
+        .setLngLat([numLng, numLat])
+        .addTo(map);
+
+      if (draggable) {
+        if (onDragStart) marker.on("dragstart", () => onDragStart(marker.getLngLat()));
+        if (onDrag) marker.on("drag", () => onDrag(marker.getLngLat()));
+        if (onDragEnd) marker.on("dragend", () => onDragEnd(marker.getLngLat()));
+      }
+
+      markerRef.current = marker;
+    } else {
+      markerRef.current.setLngLat([numLng, numLat]);
+    }
   }, [
     map,
     isLoaded,
     longitude,
     latitude,
     draggable,
+    anchor,
     className,
     onClick,
     onMouseEnter,
@@ -513,11 +546,15 @@ export function MapMarker({
     onDragEnd,
   ]);
 
+  // Remove marker from map on unmount
   useEffect(() => {
-    if (markerRef.current && longitude != null && latitude != null) {
-      markerRef.current.setLngLat([longitude, latitude]);
-    }
-  }, [longitude, latitude]);
+    return () => {
+      if (markerRef.current) {
+        markerRef.current.remove();
+        markerRef.current = null;
+      }
+    };
+  }, []);
 
   return (
     <MarkerContext.Provider
@@ -548,9 +585,8 @@ export function MarkerLabel({
   const isBottom = position === "bottom";
   return (
     <div
-      className={`mapcn-marker-label absolute left-1/2 -translate-x-1/2 whitespace-nowrap px-1.5 py-0.5 rounded text-xs font-medium bg-background/90 text-foreground shadow border pointer-events-none ${
-        isBottom ? "top-full mt-1" : "bottom-full mb-1"
-      } ${className}`}
+      className={`mapcn-marker-label absolute left-1/2 -translate-x-1/2 whitespace-nowrap px-1.5 py-0.5 rounded text-xs font-medium bg-background/90 text-foreground shadow border pointer-events-none ${isBottom ? "top-full mt-1" : "bottom-full mb-1"
+        } ${className}`}
     >
       {children}
     </div>
@@ -715,95 +751,195 @@ export function MapRoute({
   id,
   coordinates = [], // [[lng, lat], ...]
   color = "#4285F4",
-  width = 3,
-  opacity = 0.8,
+  width = 5,
+  opacity = 0.9,
   dashArray = null,
   onClick,
   onMouseEnter,
   onMouseLeave,
   interactive = false,
 }) {
-  const { map, isLoaded } = useMap();
+  const { map, isLoaded, styleVersion } = useMap();
   const generatedId = useId().replace(/:/g, "_");
   const layerId = id || `mapcn-route-${generatedId}`;
   const sourceId = `mapcn-source-${layerId}`;
 
+  const onClickRef = useRef(onClick);
   useEffect(() => {
-    if (!isLoaded || !map || !coordinates || coordinates.length < 2) return;
+    onClickRef.current = onClick;
+  }, [onClick]);
 
-    const geojson = {
-      type: "Feature",
-      geometry: {
-        type: "LineString",
-        coordinates: coordinates,
-      },
-    };
+  const onMouseEnterRef = useRef(onMouseEnter);
+  useEffect(() => {
+    onMouseEnterRef.current = onMouseEnter;
+  }, [onMouseEnter]);
 
-    if (!map.getSource(sourceId)) {
-      map.addSource(sourceId, {
-        type: "geojson",
-        data: geojson,
-      });
+  const onMouseLeaveRef = useRef(onMouseLeave);
+  useEffect(() => {
+    onMouseLeaveRef.current = onMouseLeave;
+  }, [onMouseLeave]);
 
-      const paint = {
-        "line-color": color,
-        "line-width": width,
-        "line-opacity": opacity,
+  // Main synchronizer: keeps GeoJSON source and line layer in sync with props
+  useEffect(() => {
+    if (!isLoaded || !map) return;
+
+    let cancelled = false;
+
+    function syncRoute() {
+      if (cancelled || !map || typeof map.getSource !== "function") return;
+
+      // If map style is still loading or switching, wait for styledata event
+      if (typeof map.isStyleLoaded === "function" && !map.isStyleLoaded()) {
+        map.once("styledata", syncRoute);
+        return;
+      }
+
+      // Filter and sanitize coordinates: must be valid numeric pairs [lng, lat]
+      const validCoords = [];
+      if (Array.isArray(coordinates)) {
+        for (const pt of coordinates) {
+          if (Array.isArray(pt) && pt.length >= 2) {
+            let lng = Number(pt[0]);
+            let lat = Number(pt[1]);
+            if (!isNaN(lng) && !isNaN(lat)) {
+              // Safeguard: auto-swap if coordinates were passed as [lat, lng] (e.g. India/Bangalore bounds)
+              if (lng >= 8 && lng <= 38 && lat >= 68 && lat <= 98) {
+                const temp = lng;
+                lng = lat;
+                lat = temp;
+              }
+              validCoords.push([lng, lat]);
+            }
+          }
+        }
+      }
+
+      const geojson = {
+        type: "FeatureCollection",
+        features:
+          validCoords.length >= 2
+            ? [
+                {
+                  type: "Feature",
+                  properties: {},
+                  geometry: {
+                    type: "LineString",
+                    coordinates: validCoords,
+                  },
+                },
+              ]
+            : [],
       };
-      if (dashArray) {
-        paint["line-dasharray"] = dashArray;
+
+      // 1. Ensure GeoJSON source exists and is up to date
+      try {
+        let source = map.getSource(sourceId);
+        if (!source) {
+          map.addSource(sourceId, {
+            type: "geojson",
+            data: geojson,
+          });
+        } else {
+          source.setData(geojson);
+        }
+      } catch (err) {
+        console.warn("MapRoute: error updating source", sourceId, err);
       }
 
-      map.addLayer({
-        id: layerId,
-        type: "line",
-        source: sourceId,
-        layout: {
-          "line-join": "round",
-          "line-cap": "round",
-        },
-        paint: paint,
-      });
+      // 2. Ensure line layer exists and paint properties match
+      try {
+        if (!map.getLayer(layerId)) {
+          const paint = {
+            "line-color": color,
+            "line-width": width,
+            "line-opacity": opacity,
+          };
+          if (dashArray) {
+            paint["line-dasharray"] = dashArray;
+          }
 
-      if (interactive || onClick || onMouseEnter || onMouseLeave) {
-        if (onClick) map.on("click", layerId, onClick);
+          map.addLayer({
+            id: layerId,
+            type: "line",
+            source: sourceId,
+            layout: {
+              "line-join": "round",
+              "line-cap": "round",
+              visibility: validCoords.length >= 2 ? "visible" : "none",
+            },
+            paint: paint,
+          });
 
-        map.on("mouseenter", layerId, (e) => {
-          map.getCanvas().style.cursor = "pointer";
-          if (onMouseEnter) onMouseEnter(e);
-        });
+          if (interactive || onClick || onMouseEnter || onMouseLeave) {
+            map.on("click", layerId, (e) => onClickRef.current?.(e));
+            map.on("mouseenter", layerId, (e) => {
+              map.getCanvas().style.cursor = "pointer";
+              onMouseEnterRef.current?.(e);
+            });
+            map.on("mouseleave", layerId, (e) => {
+              map.getCanvas().style.cursor = "";
+              onMouseLeaveRef.current?.(e);
+            });
+          }
+        } else {
+          map.setPaintProperty(layerId, "line-color", color);
+          map.setPaintProperty(layerId, "line-width", width);
+          map.setPaintProperty(layerId, "line-opacity", opacity);
+          if (dashArray) {
+            map.setPaintProperty(layerId, "line-dasharray", dashArray);
+          }
+          map.setLayoutProperty(
+            layerId,
+            "visibility",
+            validCoords.length >= 2 ? "visible" : "none"
+          );
+        }
 
-        map.on("mouseleave", layerId, (e) => {
-          map.getCanvas().style.cursor = "";
-          if (onMouseLeave) onMouseLeave(e);
-        });
+        // Always elevate active route line to the very top so it's above basemap & heat layers
+        if (validCoords.length >= 2) {
+          try {
+            map.moveLayer(layerId);
+          } catch {
+            /* ignore */
+          }
+        }
+      } catch (err) {
+        console.warn("MapRoute: error updating layer", layerId, err);
       }
-    } else {
-      map.getSource(sourceId).setData(geojson);
-      map.setPaintProperty(layerId, "line-color", color);
-      map.setPaintProperty(layerId, "line-width", width);
-      map.setPaintProperty(layerId, "line-opacity", opacity);
     }
 
+    syncRoute();
+
     return () => {
-      if (map.getLayer(layerId)) map.removeLayer(layerId);
-      if (map.getSource(sourceId)) map.removeSource(sourceId);
+      cancelled = true;
+      map.off("styledata", syncRoute);
     };
   }, [
     map,
     isLoaded,
-    sourceId,
+    styleVersion,
     layerId,
+    sourceId,
     coordinates,
     color,
     width,
     opacity,
     dashArray,
     interactive,
-    onClick,
-    onMouseEnter,
-    onMouseLeave,
   ]);
+
+  // Teardown ONLY on unmount or layerId change
+  useEffect(() => {
+    return () => {
+      if (!map) return;
+      try {
+        if (map.getLayer(layerId)) map.removeLayer(layerId);
+        if (map.getSource(sourceId)) map.removeSource(sourceId);
+      } catch {
+        /* ignore */
+      }
+    };
+  }, [map, layerId, sourceId]);
 
   return null;
 }
@@ -1204,72 +1340,126 @@ export function MapClusterLayer({
 // 9. <MapHeatLayer /> Crime/Incident Density Heatmap
 // ----------------------------------------------------------------------
 export function MapHeatLayer({ heat = [], enabled = true }) {
-  const { map, isLoaded } = useMap();
+  const { map, isLoaded, styleVersion } = useMap();
 
   useEffect(() => {
-    if (!isLoaded || !map || !enabled || !heat?.length) return;
+    if (!isLoaded || !map) return;
 
     const sourceId = "mapcn-heat-source";
     const layerId = "mapcn-heat-layer";
 
-    const features = heat.map(([lat, lng, intensity]) => ({
-      type: "Feature",
-      properties: {
-        intensity: intensity || 0.5,
-      },
-      geometry: {
-        type: "Point",
-        coordinates: [lng, lat],
-      },
-    }));
-
-    const geojson = {
-      type: "FeatureCollection",
-      features: features,
-    };
-
-    if (!map.getSource(sourceId)) {
-      map.addSource(sourceId, {
-        type: "geojson",
-        data: geojson,
-      });
-
-      map.addLayer({
-        id: layerId,
-        type: "heatmap",
-        source: sourceId,
-        maxzoom: 17,
-        paint: {
-          "heatmap-weight": ["get", "intensity"],
-          "heatmap-intensity": 1.2,
-          "heatmap-color": [
-            "interpolate",
-            ["linear"],
-            ["heatmap-density"],
-            0,
-            "rgba(0,0,0,0)",
-            0.2,
-            "#34a853",
-            0.5,
-            "#fbbc04",
-            0.8,
-            "#ea8600",
-            1.0,
-            "#ea4335",
-          ],
-          "heatmap-radius": 24,
-          "heatmap-opacity": 0.65,
-        },
-      });
-    } else {
-      map.getSource(sourceId).setData(geojson);
+    if (!enabled || !heat?.length) {
+      try {
+        if (map.getLayer(layerId)) map.removeLayer(layerId);
+        if (map.getSource(sourceId)) map.removeSource(sourceId);
+      } catch {
+        /* ignore */
+      }
+      return;
     }
 
+    let cancelled = false;
+
+    function syncHeat() {
+      if (cancelled || !map || typeof map.getSource !== "function") return;
+
+      if (typeof map.isStyleLoaded === "function" && !map.isStyleLoaded()) {
+        map.once("styledata", syncHeat);
+        return;
+      }
+
+      const features = heat.map(([lat, lng, intensity]) => ({
+        type: "Feature",
+        properties: {
+          intensity: intensity || 0.5,
+        },
+        geometry: {
+          type: "Point",
+          coordinates: [lng, lat],
+        },
+      }));
+
+      const geojson = {
+        type: "FeatureCollection",
+        features: features,
+      };
+
+      try {
+        let source = map.getSource(sourceId);
+        if (!source) {
+          map.addSource(sourceId, {
+            type: "geojson",
+            data: geojson,
+          });
+        } else {
+          source.setData(geojson);
+        }
+
+        if (!map.getLayer(layerId)) {
+          // Find any route layer to place the heatmap UNDER routes
+          const layers = map.getStyle()?.layers || [];
+          const firstRouteLayer = layers.find((l) =>
+            l.id.startsWith("route-") ||
+            l.id.startsWith("mapcn-route-") ||
+            l.id.includes("journey-")
+          )?.id;
+
+          map.addLayer(
+            {
+              id: layerId,
+              type: "heatmap",
+              source: sourceId,
+              maxzoom: 17,
+              paint: {
+                "heatmap-weight": ["get", "intensity"],
+                "heatmap-intensity": 1.2,
+                "heatmap-color": [
+                  "interpolate",
+                  ["linear"],
+                  ["heatmap-density"],
+                  0,
+                  "rgba(0,0,0,0)",
+                  0.2,
+                  "#34a853",
+                  0.5,
+                  "#fbbc04",
+                  0.8,
+                  "#ea8600",
+                  1.0,
+                  "#ea4335",
+                ],
+                "heatmap-radius": 24,
+                "heatmap-opacity": 0.65,
+              },
+            },
+            firstRouteLayer || undefined
+          );
+        }
+      } catch (err) {
+        console.warn("MapHeatLayer error:", err);
+      }
+    }
+
+    syncHeat();
+
     return () => {
-      if (map.getLayer(layerId)) map.removeLayer(layerId);
-      if (map.getSource(sourceId)) map.removeSource(sourceId);
+      cancelled = true;
+      map.off("styledata", syncHeat);
     };
-  }, [map, isLoaded, heat, enabled]);
+  }, [map, isLoaded, styleVersion, heat, enabled]);
+
+  // Teardown on unmount
+  useEffect(() => {
+    return () => {
+      if (!map) return;
+      try {
+        if (map.getLayer("mapcn-heat-layer")) map.removeLayer("mapcn-heat-layer");
+        if (map.getSource("mapcn-heat-source")) map.removeSource("mapcn-heat-source");
+      } catch {
+        /* ignore */
+      }
+    };
+  }, [map]);
 
   return null;
 }
