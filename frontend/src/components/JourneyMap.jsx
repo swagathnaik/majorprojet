@@ -12,6 +12,7 @@ import {
   useMap,
 } from "./ui/map";
 
+
 const DEFAULT_CENTER = [77.5946, 12.9716]; // [lng, lat]
 const DEFAULT_ZOOM = 16;
 

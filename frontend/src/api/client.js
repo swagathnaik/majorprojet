@@ -142,6 +142,20 @@ export const mapsApi = {
     apiRequest("/maps/ip-location", { token }),
   saferRoutes: (token, payload) =>
     apiRequest("/maps/safer-routes", { method: "POST", body: payload, token }),
+  policeStations: (token, { lat, lng, radiusKm } = {}) => {
+    let url = "/maps/police-stations";
+    const params = [];
+    if (lat != null && lng != null) {
+      params.push(`lat=${encodeURIComponent(lat)}`, `lng=${encodeURIComponent(lng)}`);
+    }
+    if (radiusKm != null) {
+      params.push(`radius_km=${encodeURIComponent(radiusKm)}`);
+    }
+    if (params.length) url += `?${params.join("&")}`;
+    return apiRequest(url, { token });
+  },
+  nearestPoliceStation: (token, lat, lng) =>
+    apiRequest(`/maps/nearest-police-station?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`, { token }),
 };
 
 export const shareApi = {

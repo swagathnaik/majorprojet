@@ -123,6 +123,21 @@ def timeout_safety_check(
     Countdown reached zero with no response → automatic SOS.
     """
     if check.status != "pending":
+        if check.status == "timeout":
+            # Idempotent response: return existing active SOS
+            from app.models.sos import SosAlert
+            alert = (
+                SosAlert.query.filter_by(journey_id=journey.id, status="active")
+                .order_by(SosAlert.created_at.desc())
+                .first()
+            )
+            return {
+                "message": "Automatic SOS already active.",
+                "safety_check": safety_check_payload(check),
+                "sos": alert.to_dict() if alert else None,
+                "notifications": [],
+                "journey": journey.to_dict(),
+            }
         raise ValueError(f"Safety check is already {check.status}.")
 
     now = datetime.now(timezone.utc)

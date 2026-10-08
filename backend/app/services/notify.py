@@ -345,16 +345,18 @@ def _send_whatsapp_cloud_sos(to_phone: str, payload: dict) -> dict:
         text_error = txt_err
         current_app.logger.warning("WhatsApp text dispatch failed: %s", txt_err)
 
-    # Step 2: Also dispatch template (guarantees delivery to handset even if 24-hr session was closed)
-    tmpl_name = template_name or "hello_world"
-    try:
-        res_tmpl = _send_whatsapp_cloud_template(to_phone, tmpl_name, template_lang)
-        results["template_sent"] = True
-        results["template_response"] = res_tmpl
-    except Exception as tmpl_err:
-        current_app.logger.warning("WhatsApp template dispatch note: %s", tmpl_err)
-        if not results["text_sent"]:
-            raise RuntimeError(f"Text failed ({text_error}); Template failed ({tmpl_err})") from tmpl_err
+    # Step 2: Only dispatch a template if a custom approved template is explicitly configured (never send "hello_world")
+    if template_name and template_name.lower() != "hello_world":
+        try:
+            res_tmpl = _send_whatsapp_cloud_template(to_phone, template_name, template_lang)
+            results["template_sent"] = True
+            results["template_response"] = res_tmpl
+        except Exception as tmpl_err:
+            current_app.logger.warning("WhatsApp custom template dispatch note: %s", tmpl_err)
+            if not results["text_sent"]:
+                raise RuntimeError(f"Text failed ({text_error}); Template failed ({tmpl_err})") from tmpl_err
+    elif not results["text_sent"] and text_error:
+        raise text_error
 
     # Step 3: Dispatch interactive GPS location pin if coordinates are valid
     if lat is not None and lng is not None:

@@ -70,6 +70,15 @@ export default function AnomalyBanner({
           >
             Simulate signal loss
           </button>
+          <button
+            type="button"
+            className="btn btn-tiny btn-danger"
+            disabled={simulating}
+            onClick={() => onSimulate("automatic_sos")}
+            title="Immediately trigger simulated Automatic SOS"
+          >
+            🚨 Trigger Auto-SOS (Demo)
+          </button>
         </div>
       )}
     </div>

@@ -148,6 +148,8 @@ export function useGeolocation({ enabled = false } = {}) {
     }
   }, [fetchIpFallback]);
 
+  const prevSampleRef = useRef(null);
+
   // Handle active watching when enabled
   useEffect(() => {
     if (!enabled) {
@@ -166,7 +168,13 @@ export function useGeolocation({ enabled = false } = {}) {
     // Start watchPosition with high accuracy for mobile/GPS devices
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
-        setPosition(mapPosition(pos));
+        const mapped = mapPositionWithDerivation(pos, prevSampleRef.current);
+        prevSampleRef.current = {
+          lat: mapped.lat,
+          lng: mapped.lng,
+          timestamp: pos.timestamp || Date.now(),
+        };
+        setPosition(mapped);
         setError(null);
         setPermissionState("granted");
       },
@@ -177,7 +185,7 @@ export function useGeolocation({ enabled = false } = {}) {
           setError(geoErrorMessage(geoError));
         }
       },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 3000 }
     );
 
     return clearWatch;
@@ -210,17 +218,62 @@ export function useGeolocation({ enabled = false } = {}) {
   };
 }
 
-function mapPosition(pos) {
+function haversineM(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function bearingDeg(lat1, lon1, lat2, lon2) {
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const y = Math.sin(dLon) * Math.cos((lat2 * Math.PI) / 180);
+  const x =
+    Math.cos((lat1 * Math.PI) / 180) * Math.sin((lat2 * Math.PI) / 180) -
+    Math.sin((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.cos(dLon);
+  return (Math.atan2(y, x) * (180 / Math.PI) + 360) % 360;
+}
+
+function mapPositionWithDerivation(pos, prev) {
   const { latitude, longitude, accuracy, speed, heading } = pos.coords;
+  let finalSpeed = speed != null && !Number.isNaN(speed) && speed >= 0 ? speed : null;
+  let finalHeading = heading != null && !Number.isNaN(heading) && heading >= 0 ? heading : null;
+
+  if (prev && prev.lat != null && prev.lng != null) {
+    const dt = ((pos.timestamp || Date.now()) - prev.timestamp) / 1000;
+    if (dt >= 0.8) {
+      const dist = haversineM(prev.lat, prev.lng, latitude, longitude);
+      if (finalSpeed == null) {
+        finalSpeed = dist < 2.0 ? 0 : dist / dt;
+      }
+      if (finalHeading == null && dist >= 3.0) {
+        finalHeading = bearingDeg(prev.lat, prev.lng, latitude, longitude);
+      }
+    }
+  }
+
   return {
     lat: latitude,
     lng: longitude,
     accuracy: accuracy ?? null,
-    speed: speed != null && !Number.isNaN(speed) ? speed : null,
-    heading: heading != null && !Number.isNaN(heading) ? heading : null,
+    speed: finalSpeed,
+    heading: finalHeading,
     source: "gps",
-    recorded_at: new Date(pos.timestamp).toISOString(),
+    recorded_at: new Date(pos.timestamp || Date.now()).toISOString(),
   };
+}
+
+function mapPosition(pos) {
+  return mapPositionWithDerivation(pos, null);
 }
 
 function geoErrorMessage(err) {

@@ -154,6 +154,16 @@ export default function SafetyModal({
                 I NEED HELP
               </button>
             </div>
+            <button
+              type="button"
+              className="btn btn-ghost btn-tiny text-danger"
+              style={{ marginTop: "0.5rem", width: "100%", opacity: 0.85 }}
+              disabled={busy}
+              onClick={onTimeout}
+              title="Simulate timer expiring immediately"
+            >
+              ⚡ Trigger Automatic SOS Now (Skip timer)
+            </button>
           </>
         ) : (
           <>
@@ -182,6 +192,16 @@ export default function SafetyModal({
                 I NEED HELP
               </button>
             </div>
+            <button
+              type="button"
+              className="btn btn-ghost btn-tiny text-danger"
+              style={{ marginTop: "0.5rem", width: "100%", opacity: 0.85 }}
+              disabled={busy}
+              onClick={onTimeout}
+              title="Trigger timeout SOS immediately"
+            >
+              ⚡ Trigger Automatic SOS Now (Skip countdown)
+            </button>
           </>
         )}
       </div>

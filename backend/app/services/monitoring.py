@@ -82,15 +82,20 @@ def build_monitoring_snapshot(journey: Journey) -> dict:
         heading = bearing_deg(prev.lat, prev.lng, last.lat, last.lng)
         heading_source = "derived" if heading is not None else None
 
-    # --- Distance traveled (sum of segments) ---
+    heading_label = compass_label(heading)
+
+    # --- Distance traveled (sum of real movement segments with GPS jitter filtering) ---
     distance_m = 0.0
     for i in range(1, point_count):
         a, b = logs[i - 1], logs[i]
-        distance_m += haversine_m(a.lat, a.lng, b.lat, b.lng)
+        seg_dist = haversine_m(a.lat, a.lng, b.lat, b.lng)
+        # Filter GPS stationary noise jitter (drift below 2.5m without speed is discarded)
+        if seg_dist >= 2.5 or (b.speed is not None and b.speed > MOVING_SPEED_MPS):
+            distance_m += seg_dist
 
     # --- Stop duration: how long current near-stationary streak has lasted ---
     stop_duration_sec = 0
-    moving_threshold = MOVING_SPEED_MPS
+    moving_threshold = 0.8  # ~3 km/h; values below this separate sensor noise from active walking
     if last:
         # Walk backwards while points look stationary
         stop_start = ensure_aware(last.recorded_at) or now
@@ -102,12 +107,17 @@ def build_monitoring_snapshot(journey: Journey) -> dict:
                 t1 = ensure_aware(prev_log.recorded_at)
                 t2 = ensure_aware(log.recorded_at)
                 if t1 and t2 and (t2 - t1).total_seconds() > 0:
-                    spd = haversine_m(
+                    seg_dist = haversine_m(
                         prev_log.lat, prev_log.lng, log.lat, log.lng
-                    ) / (t2 - t1).total_seconds()
+                    )
+                    # Discard jitter noise under 3.5 meters as stationary
+                    if seg_dist < 3.5:
+                        spd = 0.0
+                    else:
+                        spd = seg_dist / (t2 - t1).total_seconds()
                 else:
                     spd = 0.0
-            if spd is None:
+            if spd is None or spd < 0:
                 spd = 0.0
             if spd > moving_threshold:
                 break
@@ -142,6 +152,19 @@ def build_monitoring_snapshot(journey: Journey) -> dict:
     else:
         movement_status = "slow_or_uncertain"
 
+    # Enforce accurate real-time speed & heading semantics when stationary
+    if movement_status in ("stopped", "paused"):
+        speed_mps = 0.0
+        speed_source = "stopped"
+        if not heading_label or heading_label == "—":
+            heading_label = "Stationary"
+    elif speed_mps is None:
+        speed_mps = 0.0
+        speed_source = "zero_default"
+
+    if not heading_label:
+        heading_label = "Stationary" if movement_status == "stopped" else "Tracking"
+
     # --- Route / destination deviation (prefer planned polyline) ---
     deviation_m = None
     distance_to_dest_m = None
@@ -149,10 +172,9 @@ def build_monitoring_snapshot(journey: Journey) -> dict:
     if last:
         route_pts = _expected_route_latlng(journey)
         if route_pts and len(route_pts) >= 2:
-            deviation_m = round(
-                _distance_to_polyline_m(last.lat, last.lng, route_pts),
-                1,
-            )
+            raw_dev = _distance_to_polyline_m(last.lat, last.lng, route_pts)
+            # Filter minor GPS jitter when right on path
+            deviation_m = 0.0 if raw_dev < 3.0 else round(raw_dev, 1)
             deviation_basis = "expected_route"
         elif (
             journey.start_lat is not None
@@ -160,17 +182,15 @@ def build_monitoring_snapshot(journey: Journey) -> dict:
             and journey.dest_lat is not None
             and journey.dest_lng is not None
         ):
-            deviation_m = round(
-                _distance_to_segment_m(
-                    last.lat,
-                    last.lng,
-                    journey.start_lat,
-                    journey.start_lng,
-                    journey.dest_lat,
-                    journey.dest_lng,
-                ),
-                1,
+            raw_dev = _distance_to_segment_m(
+                last.lat,
+                last.lng,
+                journey.start_lat,
+                journey.start_lng,
+                journey.dest_lat,
+                journey.dest_lng,
             )
+            deviation_m = 0.0 if raw_dev < 3.0 else round(raw_dev, 1)
             deviation_basis = "start_dest_line"
 
         if journey.dest_lat is not None and journey.dest_lng is not None:
@@ -179,25 +199,49 @@ def build_monitoring_snapshot(journey: Journey) -> dict:
                 1,
             )
 
-    # --- Time / location context ---
-    hour_utc = now.hour
-    # India-ish local approx (UTC+5:30) for demo context
-    hour_ist = (hour_utc + 5) % 24
-    minute_ist_bump = 1 if now.minute + 30 >= 60 else 0
-    hour_ist = (hour_utc + 5 + minute_ist_bump) % 24
-    is_night = hour_ist >= 22 or hour_ist < 5
+    # --- Real-time Time context (Indian Standard Time UTC+5:30) ---
+    from datetime import timedelta
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
+    ist_now = now.astimezone(ist_tz)
+    hour_ist = ist_now.hour
+    minute_ist = ist_now.minute
+    time_str = ist_now.strftime("%I:%M %p")
+
+    # Safety alert hours: 20:00 (8:00 PM) to 05:00 (5:00 AM) are night alert hours
+    is_night = hour_ist >= 20 or hour_ist < 5
+    if 5 <= hour_ist < 12:
+        period = "Morning"
+    elif 12 <= hour_ist < 17:
+        period = "Afternoon"
+    elif 17 <= hour_ist < 20:
+        period = "Evening"
+    else:
+        period = "Night"
+
     time_context = {
-        "hour_ist_approx": hour_ist,
+        "hour_ist": hour_ist,
+        "minute_ist": minute_ist,
+        "time_str": time_str,
         "is_night": is_night,
-        "label": "night" if is_night else "day",
+        "period": period,
+        "label": f"Night ({time_str} · High alert)" if is_night else f"{period} ({time_str})",
     }
 
-    # --- Rough ETA (walking assumption) – not a routing engine ---
+    # --- Rough ETA with live pace adaptation ---
     eta_sec = None
     eta_note = None
     if distance_to_dest_m is not None:
-        eta_sec = int(distance_to_dest_m / WALK_SPEED_MPS)
-        eta_note = "Rough estimate at ~5 km/h walking pace (not live traffic routing)."
+        if distance_to_dest_m < 25:
+            eta_sec = 0
+            eta_note = "Arrived at destination."
+        elif speed_mps is not None and speed_mps >= 2.5:
+            # Transit / vehicle pace
+            eta_sec = max(10, int(distance_to_dest_m / speed_mps))
+            eta_note = f"Dynamic estimate at ~{round(speed_mps * 3.6)} km/h pace."
+        else:
+            # Walking pace (~5 km/h)
+            eta_sec = max(10, int(distance_to_dest_m / WALK_SPEED_MPS))
+            eta_note = "Walking pace (~5 km/h)."
 
     stop_threshold = int(current_app.config.get("STOP_THRESHOLD_SEC", 150))
     deviation_threshold = int(current_app.config.get("DEVIATION_THRESHOLD_M", 100))

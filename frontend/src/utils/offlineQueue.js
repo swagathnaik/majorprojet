@@ -28,6 +28,11 @@ export function pendingOfflineCount() {
   return readQueue().length;
 }
 
+export function clearOfflineQueue() {
+  localStorage.removeItem(QUEUE_KEY);
+  return 0;
+}
+
 export async function flushOfflineQueue({ token, postLocation, postSos }) {
   if (!navigator.onLine) return { flushed: 0, remaining: pendingOfflineCount() };
   const q = readQueue();
@@ -48,13 +53,18 @@ export async function flushOfflineQueue({ token, postLocation, postSos }) {
       }
     } catch (err) {
       const msg = (err?.message || "").toLowerCase();
+      const status = err?.status;
       if (
-        msg.includes("active journey") ||
+        status === 400 ||
+        status === 404 ||
+        msg.includes("active") ||
         msg.includes("not found") ||
         msg.includes("completed") ||
-        msg.includes("ended")
+        msg.includes("ended") ||
+        msg.includes("cancelled") ||
+        msg.includes("cannot record")
       ) {
-        // Journey is no longer active on server, safely discard queued update
+        // Journey is no longer active on server, safely discard stale queued update
         continue;
       }
       remaining.push(item);

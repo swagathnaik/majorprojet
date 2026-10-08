@@ -86,3 +86,45 @@ def safer_routes():
             }
         ), 502
     return jsonify(result), 200
+
+
+@maps_bp.get("/police-stations")
+@jwt_required(optional=True)
+def police_stations_route():
+    """
+    List verified police stations, optionally sorted by distance to user lat/lng.
+    Query params: lat (float), lng (float), radius_km (float)
+    """
+    from app.services.police_data import get_all_police_stations
+
+    user_lat = request.args.get("lat", type=float)
+    user_lng = request.args.get("lng", type=float)
+    radius_km = request.args.get("radius_km", type=float)
+
+    stations = get_all_police_stations(
+        user_lat=user_lat, user_lng=user_lng, max_radius_km=radius_km
+    )
+    return jsonify({"success": True, "count": len(stations), "police_stations": stations}), 200
+
+
+@maps_bp.get("/nearest-police-station")
+@jwt_required(optional=True)
+def nearest_police_station_route():
+    """
+    Find the closest police station to given coordinates with full details and distance.
+    Query params: lat (float, required), lng (float, required)
+    """
+    from app.services.police_data import get_nearest_police_station
+
+    user_lat = request.args.get("lat", type=float)
+    user_lng = request.args.get("lng", type=float)
+
+    if user_lat is None or user_lng is None:
+        return jsonify({"error": "Both 'lat' and 'lng' query parameters are required"}), 400
+
+    station = get_nearest_police_station(user_lat, user_lng)
+    if not station:
+        return jsonify({"error": "No police station found"}), 404
+
+    return jsonify({"success": True, "nearest_station": station}), 200
+

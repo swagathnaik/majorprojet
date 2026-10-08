@@ -19,6 +19,7 @@ export default function JourneyBottomSheet({
   geoError = "",
   statusMsg = "",
   offlinePending = 0,
+  onClearOffline,
   permissionState = "granted",
   intervalSec = 5,
   followMode = true,
@@ -326,8 +327,35 @@ export default function JourneyBottomSheet({
           {geoError && <div className="map-error">{geoError}</div>}
           {statusMsg && <div className="map-ok">{statusMsg}</div>}
           {offlinePending > 0 && (
-            <div className="map-error">
-              Offline queue: {offlinePending} item(s) waiting to sync
+            <div
+              className="map-error"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "8px",
+              }}
+            >
+              <span>Offline queue: {offlinePending} item(s) waiting to sync</span>
+              {onClearOffline && (
+                <button
+                  type="button"
+                  onClick={onClearOffline}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#b91c1c",
+                    fontWeight: 600,
+                    fontSize: "0.76rem",
+                    cursor: "pointer",
+                    textDecoration: "underline",
+                    padding: "0 4px",
+                  }}
+                  title="Clear stale offline updates"
+                >
+                  Clear
+                </button>
+              )}
             </div>
           )}
 

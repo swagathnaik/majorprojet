@@ -33,12 +33,12 @@ class Config:
 
     # Safety / anomaly thresholds (Phases 8+)
     LOCATION_INTERVAL_SEC = int(os.getenv("LOCATION_INTERVAL_SEC", "5"))
-    STOP_THRESHOLD_SEC = int(os.getenv("STOP_THRESHOLD_SEC", "150"))
-    DEVIATION_THRESHOLD_M = int(os.getenv("DEVIATION_THRESHOLD_M", "100"))
-    LOST_SIGNAL_SEC = int(os.getenv("LOST_SIGNAL_SEC", "75"))
-    SAFETY_RESPONSE_SEC = int(os.getenv("SAFETY_RESPONSE_SEC", "40"))
-    SOS_COUNTDOWN_SEC = int(os.getenv("SOS_COUNTDOWN_SEC", "20"))
-    ANOMALY_COOLDOWN_SEC = int(os.getenv("ANOMALY_COOLDOWN_SEC", "180"))
+    STOP_THRESHOLD_SEC = int(os.getenv("STOP_THRESHOLD_SEC", "30"))
+    DEVIATION_THRESHOLD_M = int(os.getenv("DEVIATION_THRESHOLD_M", "80"))
+    LOST_SIGNAL_SEC = int(os.getenv("LOST_SIGNAL_SEC", "45"))
+    SAFETY_RESPONSE_SEC = int(os.getenv("SAFETY_RESPONSE_SEC", "15"))
+    SOS_COUNTDOWN_SEC = int(os.getenv("SOS_COUNTDOWN_SEC", "10"))
+    ANOMALY_COOLDOWN_SEC = int(os.getenv("ANOMALY_COOLDOWN_SEC", "45"))
     DEMO_MODE = os.getenv("DEMO_MODE", "true").lower() == "true"
 
     # Share / notify

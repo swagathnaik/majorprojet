@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import { journeysApi, safetyApi } from "../api/client";
+import { journeysApi, mapsApi, safetyApi } from "../api/client";
 import { useGeolocation } from "../hooks/useGeolocation";
 import JourneyMap from "../components/JourneyMap";
 import MonitoringPanel from "../components/MonitoringPanel";
@@ -9,7 +9,9 @@ import SafetyModal from "../components/SafetyModal";
 import SafeRoutePlanner from "../components/SafeRoutePlanner";
 import JourneyBottomSheet from "../components/JourneyBottomSheet";
 import PostJourneyFeedbackModal from "../components/PostJourneyFeedbackModal";
+
 import {
+  clearOfflineQueue,
   enqueueOffline,
   flushOfflineQueue,
   pendingOfflineCount,
@@ -145,8 +147,16 @@ export default function Journey() {
       }
     }
     flush();
+    const timer = setInterval(() => {
+      if (pendingOfflineCount() > 0) {
+        flush();
+      }
+    }, 5000);
     window.addEventListener("online", flush);
-    return () => window.removeEventListener("online", flush);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("online", flush);
+    };
   }, [token, refreshActive]);
 
   useEffect(() => {
@@ -169,6 +179,7 @@ export default function Journey() {
       clearInterval(id);
     };
   }, [inProgress, journeyId, token]);
+
 
   useEffect(() => {
     if ((!isLive && journeyStatus !== "sos") || !journeyId) return;
@@ -223,15 +234,15 @@ export default function Journey() {
     return () => clearInterval(id);
   }, [isLive, journeyStatus, journeyId, token, intervalSec, refreshActive]);
 
-function sendBrowserNotification(title, options) {
-  try {
-    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
-      new Notification(title, options);
+  function sendBrowserNotification(title, options) {
+    try {
+      if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+        new Notification(title, options);
+      }
+    } catch {
+      /* Ignore browser notification errors */
     }
-  } catch {
-    /* Ignore browser notification errors */
   }
-}
 
   async function startJourneyFromPlanner(payload) {
     setBusy(true);
@@ -240,12 +251,14 @@ function sendBrowserNotification(title, options) {
     setSosAlert(null);
     setShareCopied(false);
     if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission().catch(() => {});
+      Notification.requestPermission().catch(() => { });
     }
     try {
       const data = await journeysApi.start(token, payload);
       setJourney(data.journey);
       setShareUrl(data.share?.share_url || data.journey?.share_url || "");
+      clearOfflineQueue();
+      setOfflinePending(0);
       setLogs([]);
       setServerCount(0);
       setMonitoring(null);
@@ -448,15 +461,16 @@ function sendBrowserNotification(title, options) {
     if (!safetyCheck || busy) return;
     setBusy(true);
     setError("");
+    const checkIdToTimeout = safetyCheck.id;
     try {
       const payload = position
         ? { lat: position.lat, lng: position.lng }
         : {};
-      const data = await safetyApi.timeout(token, safetyCheck.id, payload);
+      const data = await safetyApi.timeout(token, checkIdToTimeout, payload);
       setSafetyCheck(null);
       setOpenAnomalies([]);
-      setJourney(data.journey);
-      setSosAlert(data.sos);
+      if (data.journey) setJourney(data.journey);
+      if (data.sos) setSosAlert(data.sos);
       sendBrowserNotification("🚨 Automatic SOS Triggered", {
         body: "No response to safety check. Automatic SOS alert sent to trusted contacts.",
         tag: "sos_alert",
@@ -468,8 +482,11 @@ function sendBrowserNotification(title, options) {
         )
       );
     } catch (err) {
-      if (!String(err.message || "").includes("already")) {
-        setError(err.message || "Timeout handling failed.");
+      try {
+        const mon = await journeysApi.monitoring(token, journey.id);
+        applyMonitoringPayload(mon);
+      } catch {
+        /* ignore */
       }
       setSafetyCheck(null);
     } finally {
@@ -582,6 +599,10 @@ function sendBrowserNotification(title, options) {
               geoError={geoError}
               statusMsg={statusMsg}
               offlinePending={offlinePending}
+              onClearOffline={() => {
+                clearOfflineQueue();
+                setOfflinePending(0);
+              }}
               permissionState={permissionState}
               intervalSec={intervalSec}
               followMode={followMode}

@@ -82,9 +82,29 @@ def simulate_anomaly(journey: Journey, anomaly_type: str) -> dict:
         "route_deviation",
         "lost_signal",
         "speed_spike",
+        "automatic_sos",
     }
     if anomaly_type not in allowed:
         raise ValueError(f"Unknown anomaly type. Use one of: {', '.join(sorted(allowed))}")
+
+    if anomaly_type == "automatic_sos":
+        from app.services.sos_service import create_sos_alert
+        lat = journey.dest_lat or journey.start_lat
+        lng = journey.dest_lng or journey.start_lng
+        alert, notifications = create_sos_alert(
+            journey,
+            sos_type="automatic",
+            reason="Simulated Automatic SOS: critical anomaly detected (timeout demo)",
+            lat=lat,
+            lng=lng,
+        )
+        db.session.commit()
+        return {
+            "message": "Automatic SOS triggered directly.",
+            "sos": alert.to_dict(),
+            "journey": journey.to_dict(),
+            "notifications": notifications,
+        }
 
     # Clear skip only for demo force – still avoid duplicate open of same type
     existing = (
@@ -117,17 +137,17 @@ def simulate_anomaly(journey: Journey, anomaly_type: str) -> dict:
 
 
 def _rule_candidates(journey: Journey, mon: dict) -> list[dict]:
-    stop_threshold = int(current_app.config.get("STOP_THRESHOLD_SEC", 150))
-    deviation_threshold = int(current_app.config.get("DEVIATION_THRESHOLD_M", 100))
-    lost_signal_sec = int(current_app.config.get("LOST_SIGNAL_SEC", 75))
+    stop_threshold = int(current_app.config.get("STOP_THRESHOLD_SEC", 30))
+    deviation_threshold = int(current_app.config.get("DEVIATION_THRESHOLD_M", 80))
+    lost_signal_sec = int(current_app.config.get("LOST_SIGNAL_SEC", 45))
 
     candidates = []
 
-    # Rule 1 – prolonged stop (must have been moving earlier in journey)
+    # Rule 1 – prolonged stop
+    # Triggers when stopped for >= stop_threshold seconds
     if (
         mon.get("movement_status") == "stopped"
         and mon.get("stop_duration_sec", 0) >= stop_threshold
-        and _had_recent_motion(journey.id)
     ):
         candidates.append(
             {
@@ -136,19 +156,18 @@ def _rule_candidates(journey: Journey, mon: dict) -> list[dict]:
                 "details": {
                     "stop_duration_sec": mon.get("stop_duration_sec"),
                     "threshold_sec": stop_threshold,
-                    "message": "Unexpected prolonged inactivity after movement.",
+                    "message": "Unexpected prolonged inactivity detected.",
                 },
             }
         )
 
-    # Rule 2 – significant route deviation (needs dest coords and active movement)
+    # Rule 2 – significant route deviation
     deviation = mon.get("deviation_m")
     if (
         deviation is not None
         and deviation >= deviation_threshold
         and journey.dest_lat is not None
         and journey.dest_lng is not None
-        and _has_started_journey_motion(journey.id)
     ):
         candidates.append(
             {

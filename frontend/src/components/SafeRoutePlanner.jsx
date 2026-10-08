@@ -60,7 +60,7 @@ export default function SafeRoutePlanner({
     }
   }, [position, origin, token]);
 
-  // Load contacts and crime heatmap on boot
+  // Load contacts, crime heatmap, and police stations on boot
   useEffect(() => {
     async function boot() {
       try {
@@ -80,6 +80,21 @@ export default function SafeRoutePlanner({
     }
     boot();
   }, [token]);
+
+  // Refresh police stations with distance relative to origin
+  useEffect(() => {
+    if (origin?.lat != null && origin?.lng != null) {
+      mapsApi
+        .policeStations(token, { lat: origin.lat, lng: origin.lng })
+        .then((res) => {
+          if (res?.police_stations) {
+            setPoliceStations(res.police_stations);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [token, origin?.lat, origin?.lng]);
+
 
   const locateMe = useCallback(async () => {
     try {
