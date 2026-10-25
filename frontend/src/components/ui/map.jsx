@@ -208,12 +208,7 @@ export function Map({
     instance.on("load", () => {
       setMap(instance);
       setIsLoaded(true);
-    });
-
-    instance.on("styledata", (e) => {
-      if (e && e.dataType === "style") {
-        setStyleVersion((v) => v + 1);
-      }
+      setStyleVersion(1);
     });
 
     if (onViewportChange) {
@@ -255,7 +250,31 @@ export function Map({
     }
     if (currentAppliedStyleRef.current !== targetStyle) {
       currentAppliedStyleRef.current = targetStyle;
-      map.setStyle(targetStyle);
+
+      let applied = false;
+      const notifyStyleReady = () => {
+        if (applied) return;
+        applied = true;
+        map.off("style.load", notifyStyleReady);
+        map.off("styledata", onStyleData);
+        setStyleVersion((v) => v + 1);
+      };
+
+      const onStyleData = () => {
+        if (!applied && typeof map.isStyleLoaded === "function" && map.isStyleLoaded()) {
+          notifyStyleReady();
+        }
+      };
+
+      // With diff: false, MapLibre reliably emits 'style.load' when the style is loaded
+      map.once("style.load", notifyStyleReady);
+      map.setStyle(targetStyle, { diff: false });
+      map.on("styledata", onStyleData);
+
+      return () => {
+        map.off("style.load", notifyStyleReady);
+        map.off("styledata", onStyleData);
+      };
     }
   }, [map, isLoaded, resolveStyle]);
 
@@ -369,7 +388,6 @@ export function MapControls({
   className = "",
 }) {
   const { map, isLoaded, theme, toggleTheme } = useMap();
-  const themeControlContainerRef = useRef(null);
 
   useEffect(() => {
     if (!isLoaded || !map) return;
@@ -788,9 +806,9 @@ export function MapRoute({
     function syncRoute() {
       if (cancelled || !map || typeof map.getSource !== "function") return;
 
-      // If map style is still loading or switching, wait for styledata event
+      // If map style is still loading or switching, wait for style.load or styledata
       if (typeof map.isStyleLoaded === "function" && !map.isStyleLoaded()) {
-        map.once("styledata", syncRoute);
+        map.once("style.load", syncRoute);
         return;
       }
 
@@ -910,9 +928,24 @@ export function MapRoute({
 
     syncRoute();
 
+    map.on("style.load", syncRoute);
+
+    const onStyleData = () => {
+      if (cancelled || !map) return;
+      if (
+        typeof map.isStyleLoaded === "function" &&
+        map.isStyleLoaded() &&
+        !map.getLayer(layerId)
+      ) {
+        syncRoute();
+      }
+    };
+    map.on("styledata", onStyleData);
+
     return () => {
       cancelled = true;
-      map.off("styledata", syncRoute);
+      map.off("style.load", syncRoute);
+      map.off("styledata", onStyleData);
     };
   }, [
     map,
@@ -987,81 +1020,111 @@ export function MapArc({
   interactive = true,
   beforeId,
 }) {
-  const { map, isLoaded } = useMap();
+  const { map, isLoaded, styleVersion } = useMap();
   const sourceId = `mapcn-arc-source-${id}`;
   const layerId = `mapcn-arc-layer-${id}`;
 
   useEffect(() => {
     if (!isLoaded || !map || !data?.length) return;
 
-    const features = data.map((arc, index) => {
-      const coords = getQuadraticBezierPoints(
-        arc.from,
-        arc.to,
-        arc.curvature ?? curvature,
-        samples
-      );
-      return {
-        type: "Feature",
-        id: arc.id || index,
-        properties: { ...arc },
-        geometry: {
-          type: "LineString",
-          coordinates: coords,
-        },
-      };
-    });
+    let cancelled = false;
 
-    const geojson = {
-      type: "FeatureCollection",
-      features,
-    };
+    function syncArc() {
+      if (cancelled || !map || typeof map.getSource !== "function") return;
 
-    if (!map.getSource(sourceId)) {
-      map.addSource(sourceId, {
-        type: "geojson",
-        data: geojson,
+      if (typeof map.isStyleLoaded === "function" && !map.isStyleLoaded()) {
+        map.once("style.load", syncArc);
+        return;
+      }
+
+      const features = data.map((arc, index) => {
+        const coords = getQuadraticBezierPoints(
+          arc.from,
+          arc.to,
+          arc.curvature ?? curvature,
+          samples
+        );
+        return {
+          type: "Feature",
+          id: arc.id || index,
+          properties: { ...arc },
+          geometry: {
+            type: "LineString",
+            coordinates: coords,
+          },
+        };
       });
 
-      map.addLayer(
-        {
-          id: layerId,
-          type: "line",
-          source: sourceId,
-          layout: layout,
-          paint: paint,
-        },
-        beforeId
-      );
+      const geojson = {
+        type: "FeatureCollection",
+        features,
+      };
 
-      if (interactive) {
-        if (onClick) {
-          map.on("click", layerId, (e) => {
-            if (e.features?.length) onClick(e.features[0]);
+      if (!map.getSource(sourceId)) {
+        map.addSource(sourceId, {
+          type: "geojson",
+          data: geojson,
+        });
+
+        map.addLayer(
+          {
+            id: layerId,
+            type: "line",
+            source: sourceId,
+            layout: layout,
+            paint: paint,
+          },
+          beforeId
+        );
+
+        if (interactive) {
+          if (onClick) {
+            map.on("click", layerId, (e) => {
+              if (e.features?.length) onClick(e.features[0]);
+            });
+          }
+
+          map.on("mouseenter", layerId, (e) => {
+            map.getCanvas().style.cursor = "pointer";
+            if (onHover && e.features?.length) onHover(e.features[0]);
+          });
+
+          map.on("mouseleave", layerId, () => {
+            map.getCanvas().style.cursor = "";
+            if (onHover) onHover(null);
           });
         }
-
-        map.on("mouseenter", layerId, (e) => {
-          map.getCanvas().style.cursor = "pointer";
-          if (onHover && e.features?.length) onHover(e.features[0]);
-        });
-
-        map.on("mouseleave", layerId, () => {
-          map.getCanvas().style.cursor = "";
-          if (onHover) onHover(null);
-        });
+      } else {
+        map.getSource(sourceId).setData(geojson);
       }
-    } else {
-      map.getSource(sourceId).setData(geojson);
     }
 
+    syncArc();
+    map.on("style.load", syncArc);
+
+    const onStyleData = () => {
+      if (cancelled || !map) return;
+      if (
+        typeof map.isStyleLoaded === "function" &&
+        map.isStyleLoaded() &&
+        !map.getLayer(layerId)
+      ) {
+        syncArc();
+      }
+    };
+    map.on("styledata", onStyleData);
+
     return () => {
+      cancelled = true;
+      map.off("style.load", syncArc);
+      map.off("styledata", onStyleData);
       if (map.getLayer(layerId)) map.removeLayer(layerId);
       if (map.getSource(sourceId)) map.removeSource(sourceId);
     };
   }, [
     map,
     isLoaded,
+    styleVersion,
     sourceId,
     layerId,
     data,
@@ -1093,7 +1156,7 @@ export function MapGeoJSON({
   interactive = false,
   beforeId,
 }) {
-  const { map, isLoaded } = useMap();
+  const { map, isLoaded, styleVersion } = useMap();
   const sourceId = `mapcn-geojson-source-${id}`;
   const fillLayerId = `mapcn-geojson-fill-${id}`;
   const lineLayerId = `mapcn-geojson-line-${id}`;
@@ -1101,61 +1164,90 @@ export function MapGeoJSON({
   useEffect(() => {
     if (!isLoaded || !map || !data) return;
 
-    const sourceConfig = {
-      type: "geojson",
-      data: data,
-      ...(promoteId ? { promoteId } : {}),
-    };
+    let cancelled = false;
 
-    if (!map.getSource(sourceId)) {
-      map.addSource(sourceId, sourceConfig);
+    function syncGeoJSON() {
+      if (cancelled || !map || typeof map.getSource !== "function") return;
 
-      if (fillPaint !== false) {
-        map.addLayer(
-          {
-            id: fillLayerId,
-            type: "fill",
-            source: sourceId,
-            paint: fillPaint,
-          },
-          beforeId
-        );
+      if (typeof map.isStyleLoaded === "function" && !map.isStyleLoaded()) {
+        map.once("style.load", syncGeoJSON);
+        return;
       }
 
-      if (linePaint !== false) {
-        map.addLayer(
-          {
-            id: lineLayerId,
-            type: "line",
-            source: sourceId,
-            paint: linePaint,
-          },
-          beforeId
-        );
-      }
+      const sourceConfig = {
+        type: "geojson",
+        data: data,
+        ...(promoteId ? { promoteId } : {}),
+      };
 
-      if (interactive && fillPaint !== false) {
-        if (onClick) {
-          map.on("click", fillLayerId, (e) => {
-            if (e.features?.length) onClick(e.features[0]);
-          });
+      if (!map.getSource(sourceId)) {
+        map.addSource(sourceId, sourceConfig);
+
+        if (fillPaint !== false) {
+          map.addLayer(
+            {
+              id: fillLayerId,
+              type: "fill",
+              source: sourceId,
+              paint: fillPaint,
+            },
+            beforeId
+          );
         }
 
-        map.on("mousemove", fillLayerId, (e) => {
-          map.getCanvas().style.cursor = "pointer";
-          if (onHover && e.features?.length) onHover(e.features[0]);
-        });
+        if (linePaint !== false) {
+          map.addLayer(
+            {
+              id: lineLayerId,
+              type: "line",
+              source: sourceId,
+              paint: linePaint,
+            },
+            beforeId
+          );
+        }
 
-        map.on("mouseleave", fillLayerId, () => {
-          map.getCanvas().style.cursor = "";
-          if (onHover) onHover(null);
-        });
+        if (interactive && fillPaint !== false) {
+          if (onClick) {
+            map.on("click", fillLayerId, (e) => {
+              if (e.features?.length) onClick(e.features[0]);
+            });
+          }
+
+          map.on("mousemove", fillLayerId, (e) => {
+            map.getCanvas().style.cursor = "pointer";
+            if (onHover && e.features?.length) onHover(e.features[0]);
+          });
+
+          map.on("mouseleave", fillLayerId, () => {
+            map.getCanvas().style.cursor = "";
+            if (onHover) onHover(null);
+          });
+        }
+      } else {
+        map.getSource(sourceId).setData(data);
       }
-    } else {
-      map.getSource(sourceId).setData(data);
     }
 
+    syncGeoJSON();
+    map.on("style.load", syncGeoJSON);
+
+    const onStyleData = () => {
+      if (cancelled || !map) return;
+      if (
+        typeof map.isStyleLoaded === "function" &&
+        map.isStyleLoaded() &&
+        (!map.getLayer(fillLayerId) || !map.getLayer(lineLayerId))
+      ) {
+        syncGeoJSON();
+      }
+    };
+    map.on("styledata", onStyleData);
+
     return () => {
+      cancelled = true;
+      map.off("style.load", syncGeoJSON);
+      map.off("styledata", onStyleData);
       if (map.getLayer(fillLayerId)) map.removeLayer(fillLayerId);
       if (map.getLayer(lineLayerId)) map.removeLayer(lineLayerId);
       if (map.getSource(sourceId)) map.removeSource(sourceId);
@@ -1163,6 +1255,7 @@ export function MapGeoJSON({
   }, [
     map,
     isLoaded,
+    styleVersion,
     data,
     sourceId,
     fillLayerId,
@@ -1193,7 +1286,7 @@ export function MapClusterLayer({
   onPointClick,
   onClusterClick,
 }) {
-  const { map, isLoaded } = useMap();
+  const { map, isLoaded, styleVersion } = useMap();
   const sourceId = "mapcn-cluster-source";
   const clusterLayerId = "mapcn-clusters";
   const clusterCountLayerId = "mapcn-cluster-count";
@@ -1202,119 +1295,148 @@ export function MapClusterLayer({
   useEffect(() => {
     if (!isLoaded || !map || !data) return;
 
-    if (!map.getSource(sourceId)) {
-      map.addSource(sourceId, {
-        type: "geojson",
-        data: data,
-        cluster: true,
-        clusterMaxZoom: clusterMaxZoom,
-        clusterRadius: clusterRadius,
-      });
+    let cancelled = false;
 
-      // Cluster circles
-      map.addLayer({
-        id: clusterLayerId,
-        type: "circle",
-        source: sourceId,
-        filter: ["has", "point_count"],
-        paint: {
-          "circle-color": [
-            "step",
-            ["get", "point_count"],
-            clusterColors[0],
-            clusterThresholds[0],
-            clusterColors[1],
-            clusterThresholds[1],
-            clusterColors[2],
-          ],
-          "circle-radius": [
-            "step",
-            ["get", "point_count"],
-            18,
-            clusterThresholds[0],
-            24,
-            clusterThresholds[1],
-            30,
-          ],
-          "circle-stroke-width": 2,
-          "circle-stroke-color": "#ffffff",
-        },
-      });
+    function syncCluster() {
+      if (cancelled || !map || typeof map.getSource !== "function") return;
 
-      // Cluster count text
-      map.addLayer({
-        id: clusterCountLayerId,
-        type: "symbol",
-        source: sourceId,
-        filter: ["has", "point_count"],
-        layout: {
-          "text-field": "{point_count_abbreviated}",
-          "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
-          "text-size": 12,
-        },
-        paint: {
-          "text-color": "#ffffff",
-        },
-      });
-
-      // Individual unclustered points
-      map.addLayer({
-        id: unclusteredLayerId,
-        type: "circle",
-        source: sourceId,
-        filter: ["!", ["has", "point_count"]],
-        paint: {
-          "circle-color": pointColor,
-          "circle-radius": 6,
-          "circle-stroke-width": 1.5,
-          "circle-stroke-color": "#ffffff",
-        },
-      });
-
-      // Cluster click: Zoom in or trigger onClusterClick
-      map.on("click", clusterLayerId, (e) => {
-        const features = map.queryRenderedFeatures(e.point, {
-          layers: [clusterLayerId],
-        });
-        const clusterId = features[0]?.properties?.cluster_id;
-        const count = features[0]?.properties?.point_count;
-        const coords = features[0]?.geometry?.coordinates;
-
-        if (onClusterClick) {
-          onClusterClick(clusterId, coords, count);
-        } else if (clusterId != null) {
-          map
-            .getSource(sourceId)
-            .getClusterExpansionZoom(clusterId, (err, zoomLevel) => {
-              if (err) return;
-              map.easeTo({
-                center: coords,
-                zoom: zoomLevel,
-              });
-            });
-        }
-      });
-
-      // Unclustered point click
-      if (onPointClick) {
-        map.on("click", unclusteredLayerId, (e) => {
-          if (e.features?.length) {
-            onPointClick(e.features[0], e.features[0].geometry.coordinates);
-          }
-        });
+      if (typeof map.isStyleLoaded === "function" && !map.isStyleLoaded()) {
+        map.once("style.load", syncCluster);
+        return;
       }
 
-      map.on("mouseenter", clusterLayerId, () => {
-        map.getCanvas().style.cursor = "pointer";
-      });
-      map.on("mouseleave", clusterLayerId, () => {
-        map.getCanvas().style.cursor = "";
-      });
-    } else {
-      map.getSource(sourceId).setData(data);
+      if (!map.getSource(sourceId)) {
+        map.addSource(sourceId, {
+          type: "geojson",
+          data: data,
+          cluster: true,
+          clusterMaxZoom: clusterMaxZoom,
+          clusterRadius: clusterRadius,
+        });
+
+        // Cluster circles
+        map.addLayer({
+          id: clusterLayerId,
+          type: "circle",
+          source: sourceId,
+          filter: ["has", "point_count"],
+          paint: {
+            "circle-color": [
+              "step",
+              ["get", "point_count"],
+              clusterColors[0],
+              clusterThresholds[0],
+              clusterColors[1],
+              clusterThresholds[1],
+              clusterColors[2],
+            ],
+            "circle-radius": [
+              "step",
+              ["get", "point_count"],
+              18,
+              clusterThresholds[0],
+              24,
+              clusterThresholds[1],
+              30,
+            ],
+            "circle-stroke-width": 2,
+            "circle-stroke-color": "#ffffff",
+          },
+        });
+
+        // Cluster count text
+        map.addLayer({
+          id: clusterCountLayerId,
+          type: "symbol",
+          source: sourceId,
+          filter: ["has", "point_count"],
+          layout: {
+            "text-field": "{point_count_abbreviated}",
+            "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+            "text-size": 12,
+          },
+          paint: {
+            "text-color": "#ffffff",
+          },
+        });
+
+        // Individual unclustered points
+        map.addLayer({
+          id: unclusteredLayerId,
+          type: "circle",
+          source: sourceId,
+          filter: ["!", ["has", "point_count"]],
+          paint: {
+            "circle-color": pointColor,
+            "circle-radius": 6,
+            "circle-stroke-width": 1.5,
+            "circle-stroke-color": "#ffffff",
+          },
+        });
+
+        // Cluster click: Zoom in or trigger onClusterClick
+        map.on("click", clusterLayerId, (e) => {
+          const features = map.queryRenderedFeatures(e.point, {
+            layers: [clusterLayerId],
+          });
+          const clusterId = features[0]?.properties?.cluster_id;
+          const count = features[0]?.properties?.point_count;
+          const coords = features[0]?.geometry?.coordinates;
+
+          if (onClusterClick) {
+            onClusterClick(clusterId, coords, count);
+          } else if (clusterId != null) {
+            map
+              .getSource(sourceId)
+              .getClusterExpansionZoom(clusterId, (err, zoomLevel) => {
+                if (err) return;
+                map.easeTo({
+                  center: coords,
+                  zoom: zoomLevel,
+                });
+              });
+          }
+        });
+
+        // Unclustered point click
+        if (onPointClick) {
+          map.on("click", unclusteredLayerId, (e) => {
+            if (e.features?.length) {
+              onPointClick(e.features[0], e.features[0].geometry.coordinates);
+            }
+          });
+        }
+
+        map.on("mouseenter", clusterLayerId, () => {
+          map.getCanvas().style.cursor = "pointer";
+        });
+        map.on("mouseleave", clusterLayerId, () => {
+          map.getCanvas().style.cursor = "";
+        });
+      } else {
+        map.getSource(sourceId).setData(data);
+      }
     }
 
+    syncCluster();
+    map.on("style.load", syncCluster);
+
+    const onStyleData = () => {
+      if (cancelled || !map) return;
+      if (
+        typeof map.isStyleLoaded === "function" &&
+        map.isStyleLoaded() &&
+        !map.getLayer(clusterLayerId)
+      ) {
+        syncCluster();
+      }
+    };
+    map.on("styledata", onStyleData);
+
     return () => {
+      cancelled = true;
+      map.off("style.load", syncCluster);
+      map.off("styledata", onStyleData);
       if (map.getLayer(clusterCountLayerId)) map.removeLayer(clusterCountLayerId);
       if (map.getLayer(clusterLayerId)) map.removeLayer(clusterLayerId);
       if (map.getLayer(unclusteredLayerId)) map.removeLayer(unclusteredLayerId);
@@ -1323,6 +1445,7 @@ export function MapClusterLayer({
   }, [
     map,
     isLoaded,
+    styleVersion,
     data,
     clusterMaxZoom,
     clusterRadius,
@@ -1364,7 +1487,7 @@ export function MapHeatLayer({ heat = [], enabled = true }) {
       if (cancelled || !map || typeof map.getSource !== "function") return;
 
       if (typeof map.isStyleLoaded === "function" && !map.isStyleLoaded()) {
-        map.once("styledata", syncHeat);
+        map.once("style.load", syncHeat);
         return;
       }
 
@@ -1441,10 +1564,24 @@ export function MapHeatLayer({ heat = [], enabled = true }) {
     }
 
     syncHeat();
+    map.on("style.load", syncHeat);
+
+    const onStyleData = () => {
+      if (cancelled || !map) return;
+      if (
+        typeof map.isStyleLoaded === "function" &&
+        map.isStyleLoaded() &&
+        !map.getLayer(layerId)
+      ) {
+        syncHeat();
+      }
+    };
+    map.on("styledata", onStyleData);
 
     return () => {
       cancelled = true;
-      map.off("styledata", syncHeat);
+      map.off("style.load", syncHeat);
+      map.off("styledata", onStyleData);
     };
   }, [map, isLoaded, styleVersion, heat, enabled]);
 

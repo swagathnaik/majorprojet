@@ -264,6 +264,12 @@ export default function Journey() {
       setMonitoring(null);
       setOpenAnomalies([]);
       setSafetyCheck(null);
+      if (positionRef.current) {
+        positionRef.current = {
+          ...positionRef.current,
+          recorded_at: new Date().toISOString(),
+        };
+      }
       lastSentAtRef.current = 0;
       setFollowMode(true);
       setStatusMsg(

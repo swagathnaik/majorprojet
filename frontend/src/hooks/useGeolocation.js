@@ -268,7 +268,11 @@ function mapPositionWithDerivation(pos, prev) {
     speed: finalSpeed,
     heading: finalHeading,
     source: "gps",
-    recorded_at: new Date(pos.timestamp || Date.now()).toISOString(),
+    recorded_at: new Date(
+      pos.timestamp && Math.abs(Date.now() - pos.timestamp) > 30000
+        ? Date.now()
+        : pos.timestamp || Date.now()
+    ).toISOString(),
   };
 }
 

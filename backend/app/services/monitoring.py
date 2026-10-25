@@ -248,7 +248,7 @@ def build_monitoring_snapshot(journey: Journey) -> dict:
 
     # Soft flags for Phase 7 UI only (Phase 8 will escalate carefully)
     flags = []
-    if movement_status == "stopped" and stop_duration_sec >= stop_threshold:
+    if movement_status == "stopped" and stop_duration_sec >= stop_threshold and distance_m >= 15.0:
         flags.append(
             {
                 "type": "prolonged_stop",

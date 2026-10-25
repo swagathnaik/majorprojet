@@ -21,7 +21,7 @@ from app.models.location import LocationLog
 from app.models.safety_check import SafetyCheck
 from app.services.monitoring import build_monitoring_snapshot
 from app.services.safety_verification import check_and_trigger_expired_safety_checks
-from app.utils.geo import ensure_aware
+from app.utils.geo import ensure_aware, haversine_m
 
 # Cooldown after user clears / after same type detected
 DEFAULT_COOLDOWN_SEC = 180
@@ -144,10 +144,11 @@ def _rule_candidates(journey: Journey, mon: dict) -> list[dict]:
     candidates = []
 
     # Rule 1 – prolonged stop
-    # Triggers when stopped for >= stop_threshold seconds
+    # Triggers when stopped for >= stop_threshold seconds after having started moving
     if (
         mon.get("movement_status") == "stopped"
         and mon.get("stop_duration_sec", 0) >= stop_threshold
+        and _has_started_journey_motion(journey.id)
     ):
         candidates.append(
             {
@@ -221,7 +222,7 @@ def _has_started_journey_motion(journey_id: int) -> bool:
 
 
 def _had_recent_motion(journey_id: int) -> bool:
-    """True if any earlier point looked like walking/moving."""
+    """True if any earlier point looked like walking/moving or covered distance."""
     logs = (
         LocationLog.query.filter_by(journey_id=journey_id)
         .order_by(LocationLog.recorded_at.asc())
@@ -230,9 +231,15 @@ def _had_recent_motion(journey_id: int) -> bool:
     for log in logs:
         if log.speed is not None and log.speed > 0.5:
             return True
-    # If we have multiple spaced points with distance, treat as motion
-    if len(logs) >= 3:
-        return True
+    # If multiple points have real displacement beyond stationary GPS jitter (>= 15 meters)
+    if len(logs) >= 2:
+        total_dist = 0.0
+        for i in range(1, len(logs)):
+            seg = haversine_m(logs[i - 1].lat, logs[i - 1].lng, logs[i].lat, logs[i].lng)
+            if seg >= 2.5:
+                total_dist += seg
+        if total_dist >= 15.0:
+            return True
     return False
 
 

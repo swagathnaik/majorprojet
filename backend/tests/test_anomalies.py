@@ -126,6 +126,26 @@ def run():
         assert r.status_code == 201, r.data
         assert r.get_json()["anomaly"]["type"] == "route_deviation"
 
+        # Regression test: stationary user at journey start must not trigger prolonged_stop
+        client.post(f"/api/journeys/{jid2}/end", headers=headers)
+        r = client.post(
+            "/api/journeys",
+            headers=headers,
+            json={"dest_label": "StartStationary", "start_lat": 12.97, "start_lng": 77.59},
+        )
+        jid3 = r.get_json()["journey"]["id"]
+        for _ in range(3):
+            client.post(
+                f"/api/journeys/{jid3}/locations",
+                headers=headers,
+                json={"lat": 12.97, "lng": 77.59, "speed": 0.0},
+            )
+        r = client.get(f"/api/journeys/{jid3}/monitoring", headers=headers)
+        assert r.status_code == 200
+        body3 = r.get_json()
+        assert not any(a["type"] == "prolonged_stop" for a in body3["open_anomalies"]), "prolonged_stop should not fire at start without motion"
+        assert body3["active_safety_check"] is None
+
         print("All Phase 8 anomaly tests passed.")
 
 

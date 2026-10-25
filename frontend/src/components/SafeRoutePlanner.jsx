@@ -91,7 +91,7 @@ export default function SafeRoutePlanner({
             setPoliceStations(res.police_stations);
           }
         })
-        .catch(() => {});
+        .catch(() => { });
     }
   }, [token, origin?.lat, origin?.lng]);
 
